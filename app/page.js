@@ -2,9 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
-// Satu efek aja: "burik kayak video yang direpost berkali-kali" —
-// mosaic/low-res blur + color banding + grain halus + audio ikut digilas.
-// Tidak ada goyangan/jitter sama sekali.
+// Satu efek aja: "burik kayak video yang direpost berkali-kali"
 const PRESETS = {
   ringan: { label: "RINGAN", intensity: 3 },
   sedang: { label: "SEDANG", intensity: 6 },
@@ -15,10 +13,10 @@ const PRESETS = {
 function computeParams(intensity) {
   const i = Math.min(10, Math.max(0.5, intensity));
   return {
-    blockDivisor: 2 + i * 1.3, // makin besar, makin gede "blok" rendah-resolusinya
-    posterizeLevels: Math.max(4, 26 - i * 2), // makin kecil, makin nge-band warnanya
-    blurPx: 0.2 + i * 0.18, // blur lembut khas video yang udah di-kompres berkali-kali
-    noiseAlpha: 0.02 + i * 0.012, // grain halus sisa kompresi
+    blockDivisor: 2 + i * 1.3,
+    posterizeLevels: Math.max(4, 26 - i * 2),
+    blurPx: 0.2 + i * 0.18,
+    noiseAlpha: 0.02 + i * 0.012,
     audioCrush: Math.min(1, i / 10),
   };
 }
@@ -38,10 +36,11 @@ export default function Page() {
   const [ready, setReady] = useState(false);
   const [presetKey, setPresetKey] = useState("sedang");
   const [intensity, setIntensity] = useState(PRESETS.sedang.intensity);
-  const [status, setStatus] = useState("idle"); // idle | previewing | processing | done | error
+  const [status, setStatus] = useState("idle"); 
   const [progress, setProgress] = useState(0);
   const [outputURL, setOutputURL] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [fileExt, setFileExt] = useState("mp4"); // Menyimpan info ekstensi akhir
 
   // ---- hero static noise (dekorasi halaman saja) ----
   useEffect(() => {
@@ -90,7 +89,7 @@ export default function Page() {
     setIntensity(v);
   };
 
-  // ---- render satu frame: mosaic blur + posterize + grain. TIDAK ADA jitter. ----
+  // ---- render satu frame: mosaic blur + posterize + grain ----
   const drawFrame = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -100,8 +99,6 @@ export default function Page() {
     const h = canvas.height;
     const { blockDivisor, posterizeLevels, blurPx, noiseAlpha } = computeParams(intensity);
 
-    // turunin ke buffer kecil (smoothing nyala = ngeblur/ngerata-in warna,
-    // efeknya seperti video resolusi rendah yang udah berkali-kali di-encode ulang)
     const mosaic = mosaicRef.current;
     const mw = Math.max(8, Math.floor(w / blockDivisor));
     const mh = Math.max(8, Math.floor(h / blockDivisor));
@@ -164,8 +161,13 @@ export default function Page() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 360;
+    
+    // PENTING: MP4 (H.264 codec) MENGHARUSKAN dimensi angka genap.
+    // Bitwise "& ~1" akan membulatkan angka ganjil ke genap terdekat ke bawah.
+    // Ini juga tetap menjaga rasio asli video pengguna.
+    canvas.width = (video.videoWidth || 640) & ~1;
+    canvas.height = (video.videoHeight || 360) & ~1;
+    
     setReady(true);
     setStatus("previewing");
     video.currentTime = Math.min(0.2, video.duration || 0);
@@ -182,10 +184,6 @@ export default function Page() {
     return () => cancelAnimationFrame(raf);
   }, [status, drawFrame]);
 
-  // Tunggu video sampai habis dengan AMAN: pakai event 'ended' tapi dikasih
-  // watchdog timer juga. Sebelumnya proses bisa "stuck" selamanya kalau
-  // event 'ended' nggak pernah nyala (durasi video kebaca aneh/Infinity,
-  // tab di-throttle browser, dll). Sekarang ada batas waktu maksimum.
   const waitForVideoToFinish = (video) => {
     return new Promise((resolve) => {
       let done = false;
@@ -204,8 +202,6 @@ export default function Page() {
       const watchdogMs = dur ? dur * 1000 + 6000 : 3 * 60 * 1000;
       const watchdogId = setTimeout(finish, watchdogMs);
 
-      // deteksi macet: kalau currentTime nggak gerak 4 detik berturut-turut
-      // padahal belum sampai akhir, anggap selesai juga supaya nggak gantung.
       let lastTime = video.currentTime;
       let stuckTicks = 0;
       const stallId = setInterval(() => {
@@ -227,7 +223,7 @@ export default function Page() {
     if (!video || !canvas) return;
 
     if (typeof canvas.captureStream !== "function" || typeof video.captureStream !== "function") {
-      setErrorMsg("Browser ini tidak mendukung pemrosesan video langsung di perangkat. Coba pakai Chrome atau Edge versi terbaru.");
+      setErrorMsg("Browser ini tidak mendukung pemrosesan video langsung di perangkat.");
       setStatus("error");
       return;
     }
@@ -294,17 +290,30 @@ export default function Page() {
         ...audioTracks,
       ]);
 
-      let mimeType = "video/webm;codecs=vp9,opus";
+      // PRIORITASKAN MP4
+      let mimeType = "video/mp4";
+      let ext = "mp4";
+
+      // Cek apakah browser mendukung MP4 via MediaRecorder (Chrome/Edge terbaru, Safari)
       if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = "video/webm;codecs=vp8,opus";
+        // Coba dengan format MP4 + H.264 spesifik (sering dipakai di Chrome)
+        mimeType = 'video/mp4; codecs="avc1.424028, mp4a.40.2"';
       }
+      
+      // Jika MP4 benar-benar tidak didukung sama sekali (misal Firefox), fallback ke webm
       if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = "video/webm";
+        mimeType = "video/webm;codecs=vp9,opus";
+        ext = "webm";
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = "video/webm";
+        }
       }
+
+      setFileExt(ext);
 
       recorder = new MediaRecorder(combined, {
         mimeType,
-        videoBitsPerSecond: 280_000,
+        videoBitsPerSecond: 1_500_000, // Dinaikkan sedikit untuk MP4 agar artifaknya dari efek kita saja, bukan karena kompresor
         audioBitsPerSecond: 32_000,
       });
 
@@ -317,7 +326,7 @@ export default function Page() {
         recorder.onstop = resolve;
       });
 
-      recorder.start(500); // flush chunks tiap 500ms biar nggak numpuk di akhir
+      recorder.start(500);
 
       const duration = video.duration || 0;
       const tick = () => {
@@ -347,7 +356,8 @@ export default function Page() {
         throw new Error("Tidak ada data yang terekam. Coba ulangi lagi.");
       }
 
-      const blob = new Blob(chunks, { type: "video/webm" });
+      // Gunakan mimeType yang terpilih (entah itu mp4 atau webm)
+      const blob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(blob);
       setOutputURL(url);
       setProgress(100);
@@ -377,10 +387,8 @@ export default function Page() {
             BURIKIN<span style={{ color: "var(--amber)" }}>.</span>
           </h1>
           <p style={styles.tagline}>
-            Bikin video jadi burik kayak udah direpost ke grup WhatsApp
-            berkali-kali — blur, warna nge-band, suara ikut pecah. Semua
-            diproses langsung di browser, tidak ada file yang diunggah ke
-            server.
+            Bikin video jadi burik kayak udah direpost ke grup WhatsApp berkali-kali. 
+            Menjaga rasio asli dan mengekspor ke MP4 (didukung di Chrome/Safari terbaru).
           </p>
         </div>
       </section>
@@ -454,9 +462,8 @@ export default function Page() {
 
             <p style={styles.note}>
               Saat tombol proses ditekan, video diputar sekali dari awal sampai
-              akhir untuk direkam ulang dengan efeknya — suaranya juga ikut
-              digilas turun bitrate-nya. Jangan tutup atau pindah tab selama
-              proses berjalan supaya tidak terhenti di tengah jalan.
+              akhir untuk direkam ulang dengan efeknya. Jangan tutup atau pindah tab selama
+              proses berjalan.
             </p>
 
             <button
@@ -468,7 +475,7 @@ export default function Page() {
               disabled={!ready || status === "processing"}
               onClick={handleProcess}
             >
-              {status === "processing" ? `MEMPROSES... ${progress}%` : "BIKININ & DOWNLOAD"}
+              {status === "processing" ? `MEMPROSES... ${progress}%` : `BIKININ & DOWNLOAD`}
             </button>
 
             {errorMsg && <p style={styles.error}>{errorMsg}</p>}
@@ -476,8 +483,8 @@ export default function Page() {
             {outputURL && (
               <div style={styles.resultBox}>
                 <video src={outputURL} controls style={styles.resultVideo} />
-                <a href={outputURL} download="burikin.webm" style={styles.downloadLink}>
-                  ⬇ DOWNLOAD HASIL (.webm)
+                <a href={outputURL} download={`burikin.${fileExt}`} style={styles.downloadLink}>
+                  ⬇ DOWNLOAD HASIL (.{fileExt})
                 </a>
               </div>
             )}
@@ -554,8 +561,17 @@ const styles = {
     marginTop: 22,
     border: "1px solid var(--line)",
     background: "#000",
+    display: "flex",
+    justifyContent: "center", // Pusatkan jika videonya vertikal
+    alignItems: "center"
   },
-  previewCanvas: { width: "100%", display: "block" },
+  previewCanvas: { 
+    width: "100%", 
+    height: "auto",      // Penting: Cegah rasio rusak / gepeng / jadi 9:16
+    maxHeight: "65vh",   // Penting: Cegah video vertikal menutupi layar sepenuhnya
+    objectFit: "contain",
+    display: "block" 
+  },
   recBadge: {
     position: "absolute",
     top: 8,
@@ -609,7 +625,14 @@ const styles = {
     padding: 16,
     background: "var(--panel)",
   },
-  resultVideo: { width: "100%", display: "block", background: "#000" },
+  resultVideo: { 
+    width: "100%", 
+    height: "auto", 
+    maxHeight: "65vh", 
+    objectFit: "contain", 
+    display: "block", 
+    background: "#000" 
+  },
   downloadLink: {
     display: "inline-block",
     marginTop: 14,
