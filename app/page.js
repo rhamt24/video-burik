@@ -4,9 +4,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 // Preset mengubah state secara spesifik
 const PRESETS = {
-  ringan: { label: "RINGAN", res: 360, fps: 24, vQuality: 3, aQuality: 3 },
-  sedang: { label: "SEDANG", res: 240, fps: 15, vQuality: 2, aQuality: 2 },
-  parah: { label: "PARAH", res: 144, fps: 8, vQuality: 1, aQuality: 1 },
+  ringan: { label: "RINGAN", res: 360, fps: 24, vQuality: 3, aQuality: 3, pixel: 1, stretch: 1 },
+  sedang: { label: "SEDANG", res: 240, fps: 15, vQuality: 2, aQuality: 2, pixel: 1, stretch: 1 },
+  parah: { label: "PARAH", res: 144, fps: 8, vQuality: 1, aQuality: 1, pixel: 2, stretch: 1 },
 };
 
 function makeDistortionCurve(amount) {
@@ -25,6 +25,7 @@ export default function Page() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const pixelCanvasRef = useRef(null); // Canvas tersembunyi untuk efek kotak-kotak
   const audioCtxRef = useRef(null);
   const heroCanvasRef = useRef(null);
 
@@ -40,13 +41,17 @@ export default function Page() {
   const [visitorCount, setVisitorCount] = useState(null);
   const [presetKey, setPresetKey] = useState("sedang");
 
-  // States Parameter Lanjutan
-  const [resHeight, setResHeight] = useState(240); // 144 (140p), 240, 360, 480, 0 (Asli)
-  const [fpsTarget, setFpsTarget] = useState(15); // 8, 12, 15, 24, 30
-  const [videoQuality, setVideoQuality] = useState(2); // 1 (Parah), 2 (Sedang), 3 (Bagus), 4 (Sangat Bagus)
-  const [audioQuality, setAudioQuality] = useState(2); // 1 (Hancur), 2 (Mendem), 3 (Biasa), 4 (Normal)
+  // States Parameter Lanjutan (Kualitas)
+  const [resHeight, setResHeight] = useState(240); // 144, 240, 360, 480, 0
+  const [fpsTarget, setFpsTarget] = useState(15); 
+  const [videoQuality, setVideoQuality] = useState(2); 
+  const [audioQuality, setAudioQuality] = useState(2); 
+  
+  // States Parameter Tambahan (Efek Lucu)
+  const [pixelScale, setPixelScale] = useState(1); // 1, 2, 4, 8, 16 (Ukuran kotak piksel)
+  const [stretchFactor, setStretchFactor] = useState(1); // 0.5 (Tinggi), 1 (Normal), 2 (Gepeng), 3 (Super Gepeng)
 
-  // Hitung ulang ukuran canvas tiap kali resHeight berubah
+  // Hitung ulang ukuran canvas tiap kali resHeight atau stretchFactor berubah
   const updateCanvasSize = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -55,20 +60,23 @@ export default function Page() {
     let vh = video.videoHeight || 360;
     let vw = video.videoWidth || 640;
 
-    // Jika pilih "Sesuai Asli" (0), pakai tinggi video bawaan
     let targetH = resHeight === 0 ? vh : resHeight;
-
-    // Jangan perbesar jika video aslinya lebih kecil dari resolusi target
     if (targetH > vh) targetH = vh;
 
-    const ratio = vw / vh;
-    let targetW = targetH * ratio;
+    const baseRatio = vw / vh;
+    // Terapkan stretch factor di sini untuk efek GEPENG wkwk
+    let targetW = targetH * baseRatio * stretchFactor;
 
-    // ATURAN WAJIB MP4/H.264: Dimensi HARUS angka genap.
-    // Bitwise "& ~1" membulatkan ke angka genap terdekat ke bawah. (Mencegah File Korup)
+    // Batasi lebar maksimum agar browser tidak crash kalau terlalu gepeng
+    if (targetW > 1920) {
+      targetW = 1920;
+      targetH = targetW / (baseRatio * stretchFactor);
+    }
+
+    // ATURAN WAJIB MP4: Harus angka genap
     canvas.width = Math.round(targetW) & ~1;
     canvas.height = Math.round(targetH) & ~1;
-  }, [resHeight]);
+  }, [resHeight, stretchFactor]);
 
   // Efek ganti preset
   const applyPreset = (key) => {
@@ -78,10 +86,12 @@ export default function Page() {
       setFpsTarget(PRESETS[key].fps);
       setVideoQuality(PRESETS[key].vQuality);
       setAudioQuality(PRESETS[key].aQuality);
+      setPixelScale(PRESETS[key].pixel);
+      setStretchFactor(PRESETS[key].stretch);
     }
   };
 
-  // Cek kalau user atur manual, ubah tombol preset jadi off
+  // Ubah tombol preset jadi off kalau diatur manual
   useEffect(() => {
     if (PRESETS[presetKey]) {
       const p = PRESETS[presetKey];
@@ -89,19 +99,21 @@ export default function Page() {
         resHeight !== p.res ||
         fpsTarget !== p.fps ||
         videoQuality !== p.vQuality ||
-        audioQuality !== p.aQuality
+        audioQuality !== p.aQuality ||
+        pixelScale !== p.pixel ||
+        stretchFactor !== p.stretch
       ) {
         setPresetKey("custom");
       }
     }
-  }, [resHeight, fpsTarget, videoQuality, audioQuality, presetKey]);
+  }, [resHeight, fpsTarget, videoQuality, audioQuality, pixelScale, stretchFactor, presetKey]);
 
-  // Update canvas kalau resolusi diubah saat preview jalan
+  // Update canvas kalau resolusi/bentuk diubah saat preview jalan
   useEffect(() => {
     if (status === "previewing" || status === "idle") {
       updateCanvasSize();
     }
-  }, [resHeight, updateCanvasSize, status]);
+  }, [resHeight, stretchFactor, updateCanvasSize, status]);
 
   useEffect(() => {
     fetch("https://api.counterapi.dev/v1/burikin-zals-app/visitor/up")
@@ -112,7 +124,6 @@ export default function Page() {
       .catch((err) => console.error("Gagal load visitor counter", err));
   }, []);
 
-  // Efek noise TV background atas
   useEffect(() => {
     const canvas = heroCanvasRef.current;
     if (!canvas) return;
@@ -150,16 +161,39 @@ export default function Page() {
   const drawFrame = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    const ctx = canvas.getContext("2d");
+    const pCanvas = pixelCanvasRef.current;
+    if (!video || !canvas || !pCanvas) return;
     
-    // Tambah sedikit kontras jika kualitas makin buruk
+    const ctx = canvas.getContext("2d");
+    const pCtx = pCanvas.getContext("2d");
+    
     const contrast = videoQuality === 1 ? 1.15 : videoQuality === 2 ? 1.05 : 1;
     const saturate = videoQuality === 1 ? 1.2 : videoQuality === 2 ? 1.1 : 1;
 
-    ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  }, [videoQuality]);
+    // Jika mode kotak-kotak piksel aktif
+    if (pixelScale > 1) {
+      const pw = Math.max(2, Math.floor(canvas.width / pixelScale));
+      const ph = Math.max(2, Math.floor(canvas.height / pixelScale));
+      
+      if (pCanvas.width !== pw || pCanvas.height !== ph) {
+        pCanvas.width = pw;
+        pCanvas.height = ph;
+      }
+
+      // Gambar ke ukuran super kecil
+      pCtx.drawImage(video, 0, 0, pw, ph);
+
+      // Tarik kembali ke ukuran besar TANPA image smoothing (menghasilkan kotak-kotak tajam/Minecraft)
+      ctx.imageSmoothingEnabled = false;
+      ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
+      ctx.drawImage(pCanvas, 0, 0, pw, ph, 0, 0, canvas.width, canvas.height);
+    } else {
+      // Jika mode normal (burik smearing alami)
+      ctx.imageSmoothingEnabled = true;
+      ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
+  }, [videoQuality, pixelScale]);
 
   const onLoadedMeta = () => {
     updateCanvasSize();
@@ -233,28 +267,21 @@ export default function Page() {
         video.addEventListener("seeked", h);
       });
 
-      // MENCEGAH METADATA DURASI SW RUSAK:
-      // Stream dikunci ke 30 FPS untuk kestabilan file MP4, meskipun 
-      // yang kita gambar ke canvas hanya 8/12 FPS (jadi tetep patah-patah).
       const canvasStream = canvas.captureStream(30); 
-      
       const audioStream = video.captureStream();
       let audioTracks = audioStream.getAudioTracks();
 
       if (audioTracks.length > 0) {
-        // MENCEGAH AUDIO DITOLAK WHATSAPP:
-        // Paksa sample rate 44100Hz agar aman di semua perangkat.
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioCtx({ sampleRate: 44100 });
         audioCtxRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(new MediaStream(audioTracks));
 
-        // Pengaturan Efek Audio
         let cutoff = 20000;
         let dist = 0;
-        if (audioQuality === 1) { cutoff = 1500; dist = 30; } // Hancur
-        else if (audioQuality === 2) { cutoff = 3000; dist = 5; } // Mendem
-        else if (audioQuality === 3) { cutoff = 8000; dist = 0; } // Sedikit teredam
+        if (audioQuality === 1) { cutoff = 1500; dist = 30; } 
+        else if (audioQuality === 2) { cutoff = 3000; dist = 5; } 
+        else if (audioQuality === 3) { cutoff = 8000; dist = 0; } 
 
         const lowpass = audioCtx.createBiquadFilter();
         lowpass.type = "lowpass";
@@ -293,16 +320,15 @@ export default function Page() {
 
       setFileExt(ext);
 
-      // Pengaturan Bitrate (Batas Bawah Aman untuk MP4)
-      let targetVBitrate = 1_000_000; // Normal
-      if (videoQuality === 1) targetVBitrate = 80_000; // Parah Kotak-kotak (TAPI AMAN DARI KORUP)
-      else if (videoQuality === 2) targetVBitrate = 200_000; // Sedang
-      else if (videoQuality === 3) targetVBitrate = 500_000; // Lumayan
+      let targetVBitrate = 1_000_000;
+      if (videoQuality === 1) targetVBitrate = 80_000; // Aman dari korup
+      else if (videoQuality === 2) targetVBitrate = 200_000; 
+      else if (videoQuality === 3) targetVBitrate = 500_000; 
 
       recorder = new MediaRecorder(combined, {
         mimeType,
         videoBitsPerSecond: targetVBitrate,
-        audioBitsPerSecond: 64_000, // Amankan audio bitrate agar tak dibisukan WA
+        audioBitsPerSecond: 64_000, 
       });
 
       const chunks = [];
@@ -311,8 +337,6 @@ export default function Page() {
       };
 
       const stopped = new Promise(resolve => recorder.onstop = resolve);
-      
-      // MENCEGAH FILE KORUP: Rekam utuh, jangan di split per 500ms
       recorder.start(); 
 
       const duration = video.duration || 0;
@@ -368,7 +392,11 @@ export default function Page() {
     if (!fileName) return `burik.${fileExt}`;
     const dotIndex = fileName.lastIndexOf(".");
     const baseName = dotIndex !== -1 ? fileName.substring(0, dotIndex) : fileName;
-    return `${baseName}_burik.${fileExt}`;
+    
+    let affix = "_burik";
+    if (stretchFactor > 1) affix += "_gepeng";
+    
+    return `${baseName}${affix}.${fileExt}`;
   };
 
   return (
@@ -394,7 +422,7 @@ export default function Page() {
           <div style={styles.eyebrow}>// NO SIGNAL — PROSES LOKAL DI PERANGKATMU</div>
           <h1 style={styles.h1}>BURIKIN-AJA<span style={{ color: "var(--amber)" }}>.</span></h1>
           <p style={styles.tagline}>
-            Burikin aja, bikin video burik kaya status wa yang di repost berkali-kali dengan mudah.
+            Bikin video burik kaya direpost berkali-kali, atau bikin videonya gepeng absurd buat meme dengan mudah.
           </p>
         </div>
       </section>
@@ -414,6 +442,7 @@ export default function Page() {
 
             <div style={styles.previewWrap}>
               <canvas ref={canvasRef} style={styles.previewCanvas} />
+              <canvas ref={pixelCanvasRef} style={{ display: "none" }} />
               <div style={styles.recBadge}>{status === "processing" ? "● BURIK" : "● PREVIEW"}</div>
             </div>
 
@@ -438,47 +467,77 @@ export default function Page() {
             {/* PARAMETER EDIT LANJUTAN */}
             <div style={styles.settingsGrid}>
               
-              <label style={styles.setLabel}>
-                <span style={styles.setTitle}>Resolusi Output</span>
-                <select style={styles.setSelect} value={resHeight} onChange={(e) => setResHeight(Number(e.target.value))}>
-                  <option value={144}>140p / 144p (Sangat Buram)</option>
-                  <option value={240}>240p (Buram)</option>
-                  <option value={360}>360p (Standar)</option>
-                  <option value={480}>480p (Lumayan)</option>
-                  <option value={0}>Sesuai Ukuran Asli</option>
-                </select>
-              </label>
+              <div style={styles.setSectionGroup}>
+                <div style={styles.setSectionTitle}>🛠️ VISUAL & AUDIO</div>
+                
+                <label style={styles.setLabel}>
+                  <span style={styles.setTitle}>Resolusi Output</span>
+                  <select style={styles.setSelect} value={resHeight} onChange={(e) => setResHeight(Number(e.target.value))}>
+                    <option value={144}>140p / 144p (Sangat Buram)</option>
+                    <option value={240}>240p (Buram)</option>
+                    <option value={360}>360p (Standar)</option>
+                    <option value={480}>480p (Lumayan)</option>
+                    <option value={0}>Sesuai Ukuran Asli</option>
+                  </select>
+                </label>
 
-              <label style={styles.setLabel}>
-                <span style={styles.setTitle}>Frame Rate (FPS)</span>
-                <select style={styles.setSelect} value={fpsTarget} onChange={(e) => setFpsTarget(Number(e.target.value))}>
-                  <option value={8}>8 FPS (Sangat Patah-patah)</option>
-                  <option value={12}>12 FPS (Patah-patah)</option>
-                  <option value={15}>15 FPS (Kurang Lancar)</option>
-                  <option value={24}>24 FPS (Normal Film)</option>
-                  <option value={30}>30 FPS (Lancar)</option>
-                </select>
-              </label>
+                <label style={styles.setLabel}>
+                  <span style={styles.setTitle}>Frame Rate (FPS)</span>
+                  <select style={styles.setSelect} value={fpsTarget} onChange={(e) => setFpsTarget(Number(e.target.value))}>
+                    <option value={8}>8 FPS (Sangat Patah-patah)</option>
+                    <option value={12}>12 FPS (Patah-patah)</option>
+                    <option value={15}>15 FPS (Kurang Lancar)</option>
+                    <option value={24}>24 FPS (Normal Film)</option>
+                    <option value={30}>30 FPS (Lancar)</option>
+                  </select>
+                </label>
 
-              <label style={styles.setLabel}>
-                <span style={styles.setTitle}>Kompresi Video (Bitrate)</span>
-                <select style={styles.setSelect} value={videoQuality} onChange={(e) => setVideoQuality(Number(e.target.value))}>
-                  <option value={1}>Parah (Kotak-kotak Ekstrem)</option>
-                  <option value={2}>Sedang (Sedikit Kotak-kotak)</option>
-                  <option value={3}>Bagus (Kompresi Normal)</option>
-                  <option value={4}>Sangat Bagus (Jernih)</option>
-                </select>
-              </label>
+                <label style={styles.setLabel}>
+                  <span style={styles.setTitle}>Kompresi Video (Bitrate)</span>
+                  <select style={styles.setSelect} value={videoQuality} onChange={(e) => setVideoQuality(Number(e.target.value))}>
+                    <option value={1}>Parah (Artefak Kompresi)</option>
+                    <option value={2}>Sedang (Sedikit Artefak)</option>
+                    <option value={3}>Bagus (Normal)</option>
+                    <option value={4}>Sangat Bagus (Jernih)</option>
+                  </select>
+                </label>
 
-              <label style={styles.setLabel}>
-                <span style={styles.setTitle}>Kualitas Suara (Audio)</span>
-                <select style={styles.setSelect} value={audioQuality} onChange={(e) => setAudioQuality(Number(e.target.value))}>
-                  <option value={1}>Hancur (Pecah & Kresek)</option>
-                  <option value={2}>Mendem (Kaya HP Jadul)</option>
-                  <option value={3}>Biasa (Sedikit Teredam)</option>
-                  <option value={4}>Normal (Jernih Asli)</option>
-                </select>
-              </label>
+                <label style={styles.setLabel}>
+                  <span style={styles.setTitle}>Kualitas Suara (Audio)</span>
+                  <select style={styles.setSelect} value={audioQuality} onChange={(e) => setAudioQuality(Number(e.target.value))}>
+                    <option value={1}>Hancur (Pecah & Kresek)</option>
+                    <option value={2}>Mendem (Kaya HP Jadul)</option>
+                    <option value={3}>Biasa (Sedikit Teredam)</option>
+                    <option value={4}>Normal (Jernih Asli)</option>
+                  </select>
+                </label>
+              </div>
+
+              <div style={styles.setSectionGroup}>
+                <div style={styles.setSectionTitle}>👽 EFEK ABSURD</div>
+                
+                <label style={styles.setLabel}>
+                  <span style={styles.setTitle}>Kotak-Kotak (Pixel)</span>
+                  <select style={styles.setSelect} value={pixelScale} onChange={(e) => setPixelScale(Number(e.target.value))}>
+                    <option value={1}>Mulus (Asli)</option>
+                    <option value={2}>Kotak Halus</option>
+                    <option value={4}>Kotak Sedang</option>
+                    <option value={8}>Kotak Besar (Retro 8-bit)</option>
+                    <option value={16}>Kotak Raksasa (Minecraft)</option>
+                  </select>
+                </label>
+
+                <label style={styles.setLabel}>
+                  <span style={styles.setTitle}>Rasio Video (Gepengin Wkwk)</span>
+                  <select style={styles.setSelect} value={stretchFactor} onChange={(e) => setStretchFactor(Number(e.target.value))}>
+                    <option value={0.5}>Kurus Kering (Tinggi)</option>
+                    <option value={1}>Normal (Sesuai Asli)</option>
+                    <option value={1.5}>Lumayan Lebar</option>
+                    <option value={2}>Gepeng (Wide)</option>
+                    <option value={3}>Super Gepeng Parah</option>
+                  </select>
+                </label>
+              </div>
 
             </div>
 
@@ -538,10 +597,16 @@ const styles = {
   presetRow: { display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" },
   presetBtn: { background: "var(--panel)", border: "1px solid var(--line)", color: "var(--dim)", padding: "8px 14px", fontSize: 12, cursor: "pointer" },
   presetBtnActive: { borderColor: "var(--amber)", color: "var(--amber)" },
-  settingsGrid: { marginTop: 20, marginBottom: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, background: "var(--panel)", border: "1px solid var(--line)", padding: 18 },
+  
+  // Gaya baru untuk Grid Parameter Edit
+  settingsGrid: { marginTop: 20, marginBottom: 20, display: "grid", gridTemplateColumns: "1fr", gap: 24, background: "var(--panel)", border: "1px solid var(--line)", padding: 20 },
+  setSectionGroup: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 },
+  setSectionTitle: { gridColumn: "1 / -1", fontSize: 14, fontWeight: "bold", color: "var(--text)", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 4 },
+  
   setLabel: { display: "flex", flexDirection: "column", gap: 6 },
   setTitle: { fontSize: 12, color: "var(--amber)", fontWeight: "bold" },
   setSelect: { background: "#000", color: "#fff", border: "1px solid var(--line)", padding: "10px", fontSize: 13, fontFamily: "inherit" },
+  
   processBtn: { width: "100%", background: "var(--green)", color: "#000", border: "none", padding: "16px", fontWeight: 800, fontSize: 14 },
   error: { color: "var(--danger)", fontSize: 13, marginTop: 12 },
   resultBox: { marginTop: 26, border: "1px solid var(--line)", padding: 16, background: "var(--panel)" },
