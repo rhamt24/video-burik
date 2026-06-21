@@ -1,9 +1,9 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "BURIK.FX — Bikin video burik, langsung di browser",
+  title: "BURIKIN — Bikin video burik, langsung di browser",
   description:
-    "Tambahin efek noise/grain/VHS ke video kamu. Diproses di perangkatmu sendiri, suara tetap aman.",
+    "Tambahin efek noise/grain/VHS/3GP jadul ke video kamu. Diproses di perangkatmu sendiri, suara ikut burik juga kalau mau.",
 };
 
 export default function RootLayout({ children }) {
