@@ -9,33 +9,31 @@ const PRESETS = {
   custom: { label: "CUSTOM", intensity: 6 },
 };
 
-// Menghitung parameter burik berdasarkan intensitas (0.5 - 10)
 function computeParams(intensity) {
   const i = Math.min(10, Math.max(0.5, intensity));
-  
   return {
-    // Seberapa kecil resolusi internalnya (1 = ukuran asli, 0.1 = 10% dari asli)
-    // Semakin kecil, makin buram dan warnanya "meleber" (smearing)
-    scaleFactor: Math.max(0.08, 1 - (i * 0.09)),
+    // FPS patah-patah khas video repost (turun ke 12 - 24 fps)
+    fps: Math.max(12, Math.round(30 - (i * 1.8))),
     
-    // FPS khas video HP jadul (turun dari 30 ke 8 fps)
-    fps: Math.max(8, Math.round(30 - (i * 2.2))),
+    // INI KUNCINYA: Bitrate dicekik parah (20kbps - 300kbps) 
+    // agar encoder MediaRecorder menghasilkan efek kotak-kotak kompresi (macroblocking) natural.
+    videoBitrate: Math.max(20_000, Math.round(350_000 - (i * 33_000))),
     
-    // Mencekik bitrate video (menghasilkan efek kotak-kotak kompresi / macroblocking alami)
-    videoBitrate: Math.max(10_000, Math.round(500_000 - (i * 49_000))),
+    // Audio bitrate ditahan di batas aman 32kbps agar TIDAK dibuang/di-mute oleh WhatsApp
+    audioBitrate: Math.max(32_000, Math.round(64_000 - (i * 3_000))),
     
-    // Mencekik bitrate audio (menghasilkan suara kresek-kresek robotik khas kompresi)
-    audioBitrate: Math.max(6_000, Math.round(64_000 - (i * 5_800))),
+    // Memotong frekuensi tinggi agar suara mendem
+    audioCutoff: Math.max(2000, Math.round(10000 - (i * 800))),
     
-    // Memotong frekuensi tinggi audio (suara makin mendem kayak direkam di kaleng)
-    audioCutoff: Math.max(1500, Math.round(10000 - (i * 850))),
-    
-    // Distorsi suara (pecah)
-    audioDistortion: i > 5 ? (i - 5) * 10 : 0
+    // Distorsi (suara pecah kresek-kresek)
+    audioDistortion: i > 5 ? (i - 4) * 12 : 0,
+
+    // Efek warna: video repost biasanya makin kontras & warnanya sedikit kacau
+    contrast: 1 + (i * 0.02),
+    saturate: 1 + (i * 0.04),
   };
 }
 
-// Fungsi untuk membuat kurva distorsi audio agar suaranya "pecah" (clipping)
 function makeDistortionCurve(amount) {
   const k = typeof amount === "number" ? amount : 50;
   const n_samples = 44100;
@@ -52,11 +50,10 @@ export default function Page() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const lowResCanvasRef = useRef(null);
   const audioCtxRef = useRef(null);
   const heroCanvasRef = useRef(null);
 
-  const [fileName, setFileName] = useState(null);
+  const [fileName, setFileName] = useState("");
   const [videoURL, setVideoURL] = useState(null);
   const [ready, setReady] = useState(false);
   const [presetKey, setPresetKey] = useState("sedang");
@@ -67,7 +64,6 @@ export default function Page() {
   const [errorMsg, setErrorMsg] = useState(null);
   const [fileExt, setFileExt] = useState("mp4");
 
-  // ---- Dekorasi TV statis di atas ----
   useEffect(() => {
     const canvas = heroCanvasRef.current;
     if (!canvas) return;
@@ -102,45 +98,15 @@ export default function Page() {
     setReady(false);
   };
 
-  const applyPreset = (key) => {
-    setPresetKey(key);
-    if (key !== "custom") setIntensity(PRESETS[key].intensity);
-  };
-
-  // ---- RENDER FRAME NATURAL BURIK ----
   const drawFrame = useCallback(() => {
     const video = videoRef.current;
-    const mainCanvas = canvasRef.current;
-    const lowResCanvas = lowResCanvasRef.current;
-    
-    if (!video || !mainCanvas || !lowResCanvas) return;
-    
-    const ctx = mainCanvas.getContext("2d");
-    const lowCtx = lowResCanvas.getContext("2d");
-    
-    const { scaleFactor } = computeParams(intensity);
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    const ctx = canvas.getContext("2d");
+    const { contrast, saturate } = computeParams(intensity);
 
-    const w = mainCanvas.width;
-    const h = mainCanvas.height;
-    
-    // 1. Hitung ukuran super kecil
-    const lw = Math.max(16, Math.floor(w * scaleFactor));
-    const lh = Math.max(16, Math.floor(h * scaleFactor));
-    
-    if (lowResCanvas.width !== lw || lowResCanvas.height !== lh) {
-      lowResCanvas.width = lw;
-      lowResCanvas.height = lh;
-    }
-
-    // 2. Gambar video ke ukuran kecil (menghilangkan detail tajam)
-    lowCtx.drawImage(video, 0, 0, lw, lh);
-
-    // 3. Tarik lagi ke ukuran asli dengan smoothing = true
-    // Ini menghasilkan efek blur & "color smearing" khas resolusi kecil
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "low";
-    ctx.drawImage(lowResCanvas, 0, 0, lw, lh, 0, 0, w, h);
-    
+    ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   }, [intensity]);
 
   const onLoadedMeta = () => {
@@ -148,17 +114,18 @@ export default function Page() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
     
-    // Batasi resolusi max (misal tinggi 480px) agar efek kompresi lebih terasa
-    // dan pastikan genap untuk codec H.264
+    // Turunkan resolusi ke sekitar 360p atau 240p untuk membantu efek burik
     let vw = video.videoWidth || 640;
     let vh = video.videoHeight || 360;
     
-    if (vh > 480) {
-      const ratio = 480 / vh;
-      vh = 480;
+    const maxHeight = 360; 
+    if (vh > maxHeight) {
+      const ratio = maxHeight / vh;
+      vh = maxHeight;
       vw = vw * ratio;
     }
 
+    // Pastikan resolusi genap (syarat wajib MP4 H.264)
     canvas.width = Math.round(vw) & ~1;
     canvas.height = Math.round(vh) & ~1;
     
@@ -167,17 +134,14 @@ export default function Page() {
     video.currentTime = Math.min(0.2, video.duration || 0);
   };
 
-  // Loop preview dengan membatasi FPS agar terlihat patah-patah
   useEffect(() => {
     if (status !== "previewing") return;
-    
     let raf;
     let lastDraw = 0;
     const loop = (timestamp) => {
       raf = requestAnimationFrame(loop);
       const { fps } = computeParams(intensity);
       const interval = 1000 / fps;
-      
       if (timestamp - lastDraw >= interval) {
         drawFrame();
         lastDraw = timestamp;
@@ -234,26 +198,23 @@ export default function Page() {
       });
 
       const params = computeParams(intensity);
-      
-      // Ambil stream dari canvas sesuai FPS burik
       const canvasStream = canvas.captureStream(params.fps);
       const audioStream = video.captureStream();
       let audioTracks = audioStream.getAudioTracks();
 
       if (audioTracks.length > 0) {
+        // Paksa sample rate ke 44100 agar WA tidak menganggapnya file aneh/korup
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioCtx();
+        const audioCtx = new AudioCtx({ sampleRate: 44100 });
         audioCtxRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(new MediaStream(audioTracks));
 
-        // 1. Lowpass filter (Bikin suara mendem kayak direkam HP jadul)
         const lowpass = audioCtx.createBiquadFilter();
         lowpass.type = "lowpass";
         lowpass.frequency.value = params.audioCutoff;
 
         let lastNode = lowpass;
 
-        // 2. Distortion (Bikin suara pecah jika intensitas parah)
         if (params.audioDistortion > 0) {
           const distortion = audioCtx.createWaveShaper();
           distortion.curve = makeDistortionCurve(params.audioDistortion);
@@ -265,6 +226,7 @@ export default function Page() {
         const dest = audioCtx.createMediaStreamDestination();
         source.connect(lowpass);
         lastNode.connect(dest);
+        
         audioTracks = dest.stream.getAudioTracks();
       }
 
@@ -273,21 +235,19 @@ export default function Page() {
         ...audioTracks,
       ]);
 
-      let mimeType = "video/mp4";
+      // Aturan ketat MIME Type untuk WA
+      let mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'; // H264 + AAC
       let ext = "mp4";
 
       if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
-      }
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = "video/webm;codecs=vp9,opus";
+        // Fallback ke webm jika browser tidak support H.264
+        mimeType = "video/webm;codecs=vp8,opus";
         ext = "webm";
         if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = "video/webm";
       }
 
       setFileExt(ext);
 
-      // Bitrate yang dicekik ini yang bikin artefak kompresi alami (kotak-kotak/blur)!
       recorder = new MediaRecorder(combined, {
         mimeType,
         videoBitsPerSecond: params.videoBitrate,
@@ -351,8 +311,30 @@ export default function Page() {
     }
   };
 
+  // Fungsi untuk mendapatkan nama file output yang dinamis
+  const getOutputFilename = () => {
+    if (!fileName) return `burik.${fileExt}`;
+    const dotIndex = fileName.lastIndexOf(".");
+    const baseName = dotIndex !== -1 ? fileName.substring(0, dotIndex) : fileName;
+    return `${baseName}_burik.${fileExt}`;
+  };
+
   return (
     <main style={styles.main}>
+      <header style={styles.headerBar}>
+        <div style={styles.credits}>
+          Created by <strong>zals</strong>
+        </div>
+        <a 
+          href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          style={styles.waLink}
+        >
+          JOIN SALURAN WA
+        </a>
+      </header>
+
       <section style={styles.hero}>
         <canvas ref={heroCanvasRef} style={styles.heroNoise} />
         <div style={styles.heroInner}>
@@ -361,7 +343,8 @@ export default function Page() {
             BURIKIN<span style={{ color: "var(--amber)" }}>.</span>
           </h1>
           <p style={styles.tagline}>
-            Bikin video burik natural kayak direpost di WhatsApp 100x. Resolusi blur, patah-patah, suaranya pecah & mendem. Ekspor ke MP4 rasio asli.
+            Bikin video burik natural dari hasil kompresi asli (bukan efek filter). 
+            Resolusi diturunkan, bitrate dicekik, dan framerate dipotong agar persis video repost WhatsApp.
           </p>
         </div>
       </section>
@@ -381,7 +364,6 @@ export default function Page() {
 
             <div style={styles.previewWrap}>
               <canvas ref={canvasRef} style={styles.previewCanvas} />
-              <canvas ref={lowResCanvasRef} style={{ display: "none" }} />
               <div style={styles.recBadge}>{status === "processing" ? "● REC" : "● PREVIEW"}</div>
             </div>
 
@@ -389,7 +371,10 @@ export default function Page() {
               {Object.keys(PRESETS).map((key) => (
                 <button
                   key={key}
-                  onClick={() => applyPreset(key)}
+                  onClick={() => {
+                    setPresetKey(key);
+                    if (key !== "custom") setIntensity(PRESETS[key].intensity);
+                  }}
                   style={{ ...styles.presetBtn, ...(presetKey === key ? styles.presetBtnActive : {}) }}
                 >
                   {PRESETS[key].label}
@@ -400,7 +385,7 @@ export default function Page() {
             <div style={styles.sliders}>
               <label style={styles.sliderLabel}>
                 <div style={styles.sliderTop}>
-                  <span>TINGKAT BURIK (Blur, Patah-patah, Suara Pecah)</span>
+                  <span>TINGKAT BURIK (Kompresi, Patah-patah, Suara Pecah)</span>
                   <span style={{ color: "var(--amber)" }}>{intensity.toFixed(1)} / 10</span>
                 </div>
                 <input
@@ -428,7 +413,7 @@ export default function Page() {
             {outputURL && (
               <div style={styles.resultBox}>
                 <video src={outputURL} controls style={styles.resultVideo} />
-                <a href={outputURL} download={`burikin_natural.${fileExt}`} style={styles.downloadLink}>
+                <a href={outputURL} download={getOutputFilename()} style={styles.downloadLink}>
                   ⬇ DOWNLOAD HASIL (.{fileExt})
                 </a>
               </div>
@@ -436,13 +421,21 @@ export default function Page() {
           </>
         )}
       </section>
+
+      <footer style={styles.footer}>
+        Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br/>
+        <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{color: "var(--amber)", textDecoration: "none"}}>Gabung Saluran WhatsApp</a>
+      </footer>
     </main>
   );
 }
 
 const styles = {
   main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px" },
-  hero: { position: "relative", padding: "56px 0 28px", overflow: "hidden", borderBottom: "1px solid var(--line)" },
+  headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
+  credits: { fontSize: 13, color: "var(--dim)" },
+  waLink: { background: "var(--amber)", color: "#000", textDecoration: "none", padding: "6px 12px", fontSize: 11, fontWeight: "bold", borderRadius: 4 },
+  hero: { position: "relative", padding: "40px 0 28px", overflow: "hidden", borderBottom: "1px solid var(--line)" },
   heroNoise: { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.5, filter: "contrast(1.4)" },
   heroInner: { position: "relative", zIndex: 1 },
   eyebrow: { fontFamily: "var(--mono-display)", fontSize: 12, letterSpacing: "0.08em", color: "var(--green)", marginBottom: 14 },
@@ -467,4 +460,5 @@ const styles = {
   resultBox: { marginTop: 26, border: "1px solid var(--line)", padding: 16, background: "var(--panel)" },
   resultVideo: { width: "100%", height: "auto", maxHeight: "65vh", objectFit: "contain", display: "block", background: "#000" },
   downloadLink: { display: "inline-block", marginTop: 14, color: "var(--amber)", fontFamily: "var(--mono-display)", fontSize: 13, textDecoration: "none", border: "1px solid var(--amber)", padding: "10px 16px" },
+  footer: { marginTop: 50, color: "var(--dim)", fontSize: 12, textAlign: "center", lineHeight: 1.6 }
 };
