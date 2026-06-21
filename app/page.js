@@ -12,23 +12,16 @@ const PRESETS = {
 function computeParams(intensity) {
   const i = Math.min(10, Math.max(0.5, intensity));
   return {
-    // FPS patah-patah khas video repost (turun ke 12 - 24 fps)
+    // FPS patah-patah visual
     fps: Math.max(12, Math.round(30 - (i * 1.8))),
     
-    // INI KUNCINYA: Bitrate dicekik parah (20kbps - 300kbps) 
-    // agar encoder MediaRecorder menghasilkan efek kotak-kotak kompresi (macroblocking) natural.
-    videoBitrate: Math.max(20_000, Math.round(350_000 - (i * 33_000))),
+    // Bitrate minimum dinaikkan ke 80kbps agar file MP4 TIDAK KORUP, 
+    // tapi tetap dapat efek macroblocking (kotak-kotak)
+    videoBitrate: Math.max(80_000, Math.round(400_000 - (i * 32_000))),
     
-    // Audio bitrate ditahan di batas aman 32kbps agar TIDAK dibuang/di-mute oleh WhatsApp
     audioBitrate: Math.max(32_000, Math.round(64_000 - (i * 3_000))),
-    
-    // Memotong frekuensi tinggi agar suara mendem
     audioCutoff: Math.max(2000, Math.round(10000 - (i * 800))),
-    
-    // Distorsi (suara pecah kresek-kresek)
     audioDistortion: i > 5 ? (i - 4) * 12 : 0,
-
-    // Efek warna: video repost biasanya makin kontras & warnanya sedikit kacau
     contrast: 1 + (i * 0.02),
     saturate: 1 + (i * 0.04),
   };
@@ -63,19 +56,13 @@ export default function Page() {
   const [outputURL, setOutputURL] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [fileExt, setFileExt] = useState("mp4");
-  
-  // State untuk menyimpan jumlah visitor
   const [visitorCount, setVisitorCount] = useState(null);
 
-  // Efek untuk mengambil & menambah jumlah visitor saat web pertama kali dimuat
   useEffect(() => {
-    // Menggunakan API gratis dari counterapi.dev dengan namespace unik "burikin-zals"
     fetch("https://api.counterapi.dev/v1/burikin-zals-app/visitor/up")
       .then((res) => res.json())
       .then((data) => {
-        if (data && data.count) {
-          setVisitorCount(data.count);
-        }
+        if (data && data.count) setVisitorCount(data.count);
       })
       .catch((err) => console.error("Gagal load visitor counter", err));
   }, []);
@@ -130,7 +117,6 @@ export default function Page() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
     
-    // Turunkan resolusi ke sekitar 360p atau 240p untuk membantu efek burik
     let vw = video.videoWidth || 640;
     let vh = video.videoHeight || 360;
     
@@ -141,7 +127,6 @@ export default function Page() {
       vw = vw * ratio;
     }
 
-    // Pastikan resolusi genap (syarat wajib MP4 H.264)
     canvas.width = Math.round(vw) & ~1;
     canvas.height = Math.round(vh) & ~1;
     
@@ -181,6 +166,7 @@ export default function Page() {
       video.addEventListener("ended", finish);
       const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : null;
       const watchdogId = setTimeout(finish, dur ? dur * 1000 + 5000 : 3 * 60 * 1000);
+      
       let lastTime = video.currentTime;
       let stuckTicks = 0;
       const stallId = setInterval(() => {
@@ -214,12 +200,16 @@ export default function Page() {
       });
 
       const params = computeParams(intensity);
-      const canvasStream = canvas.captureStream(params.fps);
+      
+      // KUNCI PERBAIKAN DURASI SW: 
+      // Stream dikunci di 30fps agar timestamp MediaRecorder stabil.
+      // Efek patah-patah (FPS rendah) diatur dari seberapa sering kanvas digambar ulang.
+      const canvasStream = canvas.captureStream(30); 
+      
       const audioStream = video.captureStream();
       let audioTracks = audioStream.getAudioTracks();
 
       if (audioTracks.length > 0) {
-        // Paksa sample rate ke 44100 agar WA tidak menganggapnya file aneh/korup
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioCtx({ sampleRate: 44100 });
         audioCtxRef.current = audioCtx;
@@ -251,12 +241,10 @@ export default function Page() {
         ...audioTracks,
       ]);
 
-      // Aturan ketat MIME Type untuk WA
-      let mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'; // H264 + AAC
+      let mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
       let ext = "mp4";
 
       if (!MediaRecorder.isTypeSupported(mimeType)) {
-        // Fallback ke webm jika browser tidak support H.264
         mimeType = "video/webm;codecs=vp8,opus";
         ext = "webm";
         if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = "video/webm";
@@ -276,7 +264,10 @@ export default function Page() {
       };
 
       const stopped = new Promise(resolve => recorder.onstop = resolve);
-      recorder.start(500);
+      
+      // KUNCI PERBAIKAN DURASI SW #2: 
+      // Direkam sebagai 1 bongkahan utuh agar metadata header video tidak pecah.
+      recorder.start(); 
 
       const duration = video.duration || 0;
       let lastDraw = 0;
@@ -284,7 +275,7 @@ export default function Page() {
       const tick = (timestamp) => {
         const interval = 1000 / params.fps;
         if (timestamp - lastDraw >= interval) {
-          drawFrame();
+          drawFrame(); // Menggambar ulang di FPS rendah (patah-patah)
           lastDraw = timestamp;
         }
         if (duration > 0) {
@@ -327,7 +318,6 @@ export default function Page() {
     }
   };
 
-  // Fungsi untuk mendapatkan nama file output yang dinamis
   const getOutputFilename = () => {
     if (!fileName) return `burik.${fileExt}`;
     const dotIndex = fileName.lastIndexOf(".");
@@ -340,29 +330,14 @@ export default function Page() {
       <header style={styles.headerBar}>
         <div style={styles.credits}>
           <span style={styles.visitorBadge}>
-            <svg 
-              xmlns="http://www.w3.org/2000/svg" 
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              strokeWidth="2" 
-              strokeLinecap="round" 
-              strokeLinejoin="round"
-            >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
             {visitorCount !== null ? visitorCount : "--"} Total Pengunjung
           </span>
         </div>
-        <a 
-          href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          style={styles.waLink}
-        >
+        <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={styles.waLink}>
           JOIN SALURAN WA
         </a>
       </header>
@@ -371,12 +346,9 @@ export default function Page() {
         <canvas ref={heroCanvasRef} style={styles.heroNoise} />
         <div style={styles.heroInner}>
           <div style={styles.eyebrow}>// NO SIGNAL — PROSES LOKAL DI PERANGKATMU</div>
-          <h1 style={styles.h1}>
-            BURIKIN-AJA<span style={{ color: "var(--amber)" }}>.</span>
-          </h1>
+          <h1 style={styles.h1}>BURIKIN-AJA<span style={{ color: "var(--amber)" }}>.</span></h1>
           <p style={styles.tagline}>
-            Burikin aja, bikin video burik kaya status wa yang di repost berkali-kali 
-            dengan mudah.
+            Burikin aja, bikin video burik kaya status wa yang di repost berkali-kali dengan mudah.
           </p>
         </div>
       </section>
@@ -466,7 +438,6 @@ const styles = {
   main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px" },
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
   credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
-  // Badge diubah jadi inline-flex untuk merapikan posisi SVG icon mata dengan teks
   visitorBadge: { display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--panel)", border: "1px solid var(--line)", padding: "6px 10px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
   waLink: { background: "var(--amber)", color: "#000", textDecoration: "none", padding: "6px 12px", fontSize: 11, fontWeight: "bold", borderRadius: 4 },
   hero: { position: "relative", padding: "40px 0 28px", overflow: "hidden", borderBottom: "1px solid var(--line)" },
