@@ -25,7 +25,7 @@ export default function Page() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const pixelCanvasRef = useRef(null); // Canvas tersembunyi untuk efek kotak-kotak
+  const pixelCanvasRef = useRef(null); 
   const audioCtxRef = useRef(null);
   const heroCanvasRef = useRef(null);
 
@@ -42,16 +42,16 @@ export default function Page() {
   const [presetKey, setPresetKey] = useState("sedang");
 
   // States Parameter Lanjutan (Kualitas)
-  const [resHeight, setResHeight] = useState(240); // 144, 240, 360, 480, 0
+  const [resHeight, setResHeight] = useState(240); 
   const [fpsTarget, setFpsTarget] = useState(15); 
   const [videoQuality, setVideoQuality] = useState(2); 
   const [audioQuality, setAudioQuality] = useState(2); 
   
   // States Parameter Tambahan (Efek Lucu)
-  const [pixelScale, setPixelScale] = useState(1); // 1, 2, 4, 8, 16 (Ukuran kotak piksel)
-  const [stretchFactor, setStretchFactor] = useState(1); // 0.5 (Tinggi), 1 (Normal), 2 (Gepeng), 3 (Super Gepeng)
+  const [pixelScale, setPixelScale] = useState(1); 
+  const [stretchFactor, setStretchFactor] = useState(1); 
 
-  // Hitung ulang ukuran canvas tiap kali resHeight atau stretchFactor berubah
+  // Hitung ulang ukuran canvas (PERBAIKAN BUG GEPENG)
   const updateCanvasSize = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -64,10 +64,8 @@ export default function Page() {
     if (targetH > vh) targetH = vh;
 
     const baseRatio = vw / vh;
-    // Terapkan stretch factor di sini untuk efek GEPENG wkwk
     let targetW = targetH * baseRatio * stretchFactor;
 
-    // Batasi lebar maksimum agar browser tidak crash kalau terlalu gepeng
     if (targetW > 1920) {
       targetW = 1920;
       targetH = targetW / (baseRatio * stretchFactor);
@@ -78,7 +76,6 @@ export default function Page() {
     canvas.height = Math.round(targetH) & ~1;
   }, [resHeight, stretchFactor]);
 
-  // Efek ganti preset
   const applyPreset = (key) => {
     setPresetKey(key);
     if (PRESETS[key]) {
@@ -91,7 +88,6 @@ export default function Page() {
     }
   };
 
-  // Ubah tombol preset jadi off kalau diatur manual
   useEffect(() => {
     if (PRESETS[presetKey]) {
       const p = PRESETS[presetKey];
@@ -108,9 +104,9 @@ export default function Page() {
     }
   }, [resHeight, fpsTarget, videoQuality, audioQuality, pixelScale, stretchFactor, presetKey]);
 
-  // Update canvas kalau resolusi/bentuk diubah saat preview jalan
+  // PERBAIKAN BUG GEPENG: Selalu update canvas kalau parameter diganti, KECUALI saat lagi rekaman
   useEffect(() => {
-    if (status === "previewing" || status === "idle") {
+    if (status !== "processing") {
       updateCanvasSize();
     }
   }, [resHeight, stretchFactor, updateCanvasSize, status]);
@@ -170,7 +166,6 @@ export default function Page() {
     const contrast = videoQuality === 1 ? 1.15 : videoQuality === 2 ? 1.05 : 1;
     const saturate = videoQuality === 1 ? 1.2 : videoQuality === 2 ? 1.1 : 1;
 
-    // Jika mode kotak-kotak piksel aktif
     if (pixelScale > 1) {
       const pw = Math.max(2, Math.floor(canvas.width / pixelScale));
       const ph = Math.max(2, Math.floor(canvas.height / pixelScale));
@@ -180,15 +175,12 @@ export default function Page() {
         pCanvas.height = ph;
       }
 
-      // Gambar ke ukuran super kecil
       pCtx.drawImage(video, 0, 0, pw, ph);
 
-      // Tarik kembali ke ukuran besar TANPA image smoothing (menghasilkan kotak-kotak tajam/Minecraft)
       ctx.imageSmoothingEnabled = false;
       ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
       ctx.drawImage(pCanvas, 0, 0, pw, ph, 0, 0, canvas.width, canvas.height);
     } else {
-      // Jika mode normal (burik smearing alami)
       ctx.imageSmoothingEnabled = true;
       ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -251,6 +243,9 @@ export default function Page() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
+    // Pastikan ukuran canvas direset ke yang terbaru sebelum mulai proses (Mencegah nyangkut gepeng)
+    updateCanvasSize();
+
     setStatus("processing");
     setProgress(0);
     setOutputURL(null);
@@ -261,11 +256,25 @@ export default function Page() {
 
     try {
       video.pause();
-      video.currentTime = 0;
+      
+      // PERBAIKAN BUG FREEZE 0%:
+      // Kasih batas waktu (timeout) 500ms. Kalau event "seeked" nyangkut gak kepanggil dari browser,
+      // aplikasinya akan tetep lanjut jalan tanpa nge-freeze di 0%.
       await new Promise((res) => {
-        const h = () => { video.removeEventListener("seeked", h); res(); };
-        video.addEventListener("seeked", h);
+        let resolved = false;
+        const finish = () => {
+          if (resolved) return;
+          resolved = true;
+          video.removeEventListener("seeked", finish);
+          res();
+        };
+        video.addEventListener("seeked", finish);
+        setTimeout(finish, 500); 
+        video.currentTime = 0;
       });
+
+      // Gambar 1 frame awal buat pancingan
+      drawFrame();
 
       const canvasStream = canvas.captureStream(30); 
       const audioStream = video.captureStream();
@@ -464,7 +473,6 @@ export default function Page() {
               </button>
             </div>
 
-            {/* PARAMETER EDIT LANJUTAN */}
             <div style={styles.settingsGrid}>
               
               <div style={styles.setSectionGroup}>
@@ -597,16 +605,12 @@ const styles = {
   presetRow: { display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" },
   presetBtn: { background: "var(--panel)", border: "1px solid var(--line)", color: "var(--dim)", padding: "8px 14px", fontSize: 12, cursor: "pointer" },
   presetBtnActive: { borderColor: "var(--amber)", color: "var(--amber)" },
-  
-  // Gaya baru untuk Grid Parameter Edit
   settingsGrid: { marginTop: 20, marginBottom: 20, display: "grid", gridTemplateColumns: "1fr", gap: 24, background: "var(--panel)", border: "1px solid var(--line)", padding: 20 },
   setSectionGroup: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 },
   setSectionTitle: { gridColumn: "1 / -1", fontSize: 14, fontWeight: "bold", color: "var(--text)", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 4 },
-  
   setLabel: { display: "flex", flexDirection: "column", gap: 6 },
   setTitle: { fontSize: 12, color: "var(--amber)", fontWeight: "bold" },
   setSelect: { background: "#000", color: "#fff", border: "1px solid var(--line)", padding: "10px", fontSize: 13, fontFamily: "inherit" },
-  
   processBtn: { width: "100%", background: "var(--green)", color: "#000", border: "none", padding: "16px", fontWeight: 800, fontSize: 14 },
   error: { color: "var(--danger)", fontSize: 13, marginTop: 12 },
   resultBox: { marginTop: 26, border: "1px solid var(--line)", padding: 16, background: "var(--panel)" },
