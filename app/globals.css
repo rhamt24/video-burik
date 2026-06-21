@@ -1,0 +1,76 @@
+:root {
+  --bg: #0a0a0c;
+  --panel: #141417;
+  --panel-2: #1b1b1f;
+  --line: #2a2a30;
+  --text: #e8e6df;
+  --dim: #84848c;
+  --amber: #ffb000;
+  --green: #39ff14;
+  --danger: #ff3b30;
+  --mono-display: "JetBrains Mono", monospace;
+  --mono-body: "Space Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono-body);
+}
+
+/* global scanline overlay — the signature texture of the page */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.025) 0px,
+    rgba(255, 255, 255, 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: var(--mono-display);
+}
+
+::selection {
+  background: var(--amber);
+  color: #000;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
