@@ -63,6 +63,22 @@ export default function Page() {
   const [outputURL, setOutputURL] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [fileExt, setFileExt] = useState("mp4");
+  
+  // State untuk menyimpan jumlah visitor
+  const [visitorCount, setVisitorCount] = useState(null);
+
+  // Efek untuk mengambil & menambah jumlah visitor saat web pertama kali dimuat
+  useEffect(() => {
+    // Menggunakan API gratis dari counterapi.dev dengan namespace unik "burikin-zals"
+    fetch("https://api.counterapi.dev/v1/burikin-zals-app/visitor/up")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.count) {
+          setVisitorCount(data.count);
+        }
+      })
+      .catch((err) => console.error("Gagal load visitor counter", err));
+  }, []);
 
   useEffect(() => {
     const canvas = heroCanvasRef.current;
@@ -324,6 +340,9 @@ export default function Page() {
       <header style={styles.headerBar}>
         <div style={styles.credits}>
           Created by <strong>zals</strong>
+          <span style={styles.visitorBadge}>
+            👁️ {visitorCount !== null ? visitorCount : "--"} views
+          </span>
         </div>
         <a 
           href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" 
@@ -344,7 +363,7 @@ export default function Page() {
           </h1>
           <p style={styles.tagline}>
             Burikin aja, bikin video burik kaya status wa yang di repost berkali-kali 
-  dengan mudah.
+            dengan mudah.
           </p>
         </div>
       </section>
@@ -433,7 +452,8 @@ export default function Page() {
 const styles = {
   main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px" },
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
-  credits: { fontSize: 13, color: "var(--dim)" },
+  credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
+  visitorBadge: { background: "var(--panel)", border: "1px solid var(--line)", padding: "4px 8px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
   waLink: { background: "var(--amber)", color: "#000", textDecoration: "none", padding: "6px 12px", fontSize: 11, fontWeight: "bold", borderRadius: 4 },
   hero: { position: "relative", padding: "40px 0 28px", overflow: "hidden", borderBottom: "1px solid var(--line)" },
   heroNoise: { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.5, filter: "contrast(1.4)" },
