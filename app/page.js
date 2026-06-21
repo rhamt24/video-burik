@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
 const PRESETS = {
-  ringan: { label: "RINGAN", noise: 0.10, scan: 0.10, chroma: 0, jitter: 0, vignette: 0.15 },
-  sedang: { label: "SEDANG", noise: 0.22, scan: 0.30, chroma: 1.5, jitter: 1, vignette: 0.30 },
-  berat: { label: "BERAT", noise: 0.38, scan: 0.55, chroma: 3.5, jitter: 2.5, vignette: 0.45 },
-  custom: { label: "CUSTOM", noise: 0.22, scan: 0.30, chroma: 1.5, jitter: 1, vignette: 0.30 },
+  ringan: { label: "RINGAN", noise: 0.10, scan: 0.10, chroma: 0, jitter: 0, vignette: 0.15, pixel: 0, posterize: 0, audioCrush: 0 },
+  sedang: { label: "SEDANG", noise: 0.22, scan: 0.30, chroma: 1.5, jitter: 1, vignette: 0.30, pixel: 0, posterize: 0, audioCrush: 0 },
+  berat: { label: "BERAT", noise: 0.38, scan: 0.55, chroma: 3.5, jitter: 2.5, vignette: 0.45, pixel: 0, posterize: 0, audioCrush: 0 },
+  jadul3gp: { label: "3GP JADUL", noise: 0.18, scan: 0.15, chroma: 1, jitter: 0.8, vignette: 0.2, pixel: 10, posterize: 16, audioCrush: 0.75 },
+  custom: { label: "CUSTOM", noise: 0.22, scan: 0.30, chroma: 1.5, jitter: 1, vignette: 0.30, pixel: 0, posterize: 0, audioCrush: 0 },
 };
 
 export default function Page() {
@@ -14,6 +15,8 @@ export default function Page() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const noiseRef = useRef(null);
+  const pixelRef = useRef(null);
+  const audioCtxRef = useRef(null);
   const rafRef = useRef(null);
   const heroCanvasRef = useRef(null);
 
@@ -90,7 +93,41 @@ export default function Page() {
     const jy = settings.jitter ? (Math.random() - 0.5) * settings.jitter * 1.5 : 0;
     ctx.translate(jx, jy);
 
-    ctx.drawImage(video, 0, 0, w, h);
+    if (settings.pixel > 0) {
+      // downscale to a tiny "144p-and-below" buffer, posterize it there
+      // (cheap, since the buffer is small), then blow it back up with
+      // smoothing disabled so the blocks stay hard-edged like an old codec.
+      const pixelCanvas = pixelRef.current;
+      const blockDivisor = Math.max(2, settings.pixel);
+      const pw = Math.max(8, Math.floor(w / blockDivisor));
+      const ph = Math.max(8, Math.floor(h / blockDivisor));
+      if (pixelCanvas.width !== pw || pixelCanvas.height !== ph) {
+        pixelCanvas.width = pw;
+        pixelCanvas.height = ph;
+      }
+      const pctx = pixelCanvas.getContext("2d");
+      pctx.imageSmoothingEnabled = false;
+      pctx.drawImage(video, 0, 0, pw, ph);
+
+      if (settings.posterize > 0) {
+        const levels = Math.max(2, Math.round(settings.posterize));
+        const step = 255 / (levels - 1);
+        const imgData = pctx.getImageData(0, 0, pw, ph);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          d[i] = Math.round(Math.round(d[i] / step) * step);
+          d[i + 1] = Math.round(Math.round(d[i + 1] / step) * step);
+          d[i + 2] = Math.round(Math.round(d[i + 2] / step) * step);
+        }
+        pctx.putImageData(imgData, 0, 0);
+      }
+
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(pixelCanvas, 0, 0, w, h);
+      ctx.imageSmoothingEnabled = true;
+    } else {
+      ctx.drawImage(video, 0, 0, w, h);
+    }
 
     // chromatic aberration: tinted offset copies, screen blend
     if (settings.chroma > 0) {
@@ -108,7 +145,13 @@ export default function Page() {
       ctx.globalCompositeOperation = "screen";
       ctx.save();
       ctx.translate(-off, 0);
-      ctx.drawImage(video, 0, 0, w, h);
+      if (settings.pixel > 0) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(pixelRef.current, 0, 0, w, h);
+        ctx.imageSmoothingEnabled = true;
+      } else {
+        ctx.drawImage(video, 0, 0, w, h);
+      }
       ctx.restore();
 
       ctx.globalAlpha = 1;
@@ -220,7 +263,45 @@ export default function Page() {
       const fps = 30;
       const canvasStream = canvas.captureStream(fps);
       const audioStream = video.captureStream();
-      const audioTracks = audioStream.getAudioTracks();
+      let audioTracks = audioStream.getAudioTracks();
+
+      // optionally route audio through a lo-fi chain so it sounds as
+      // burik as the picture: sample-and-hold downsample -> lowpass -> bitcrush
+      if (settings.audioCrush > 0 && audioTracks.length > 0) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioCtx();
+        audioCtxRef.current = audioCtx;
+        const source = audioCtx.createMediaStreamSource(new MediaStream(audioTracks));
+
+        const lowpass = audioCtx.createBiquadFilter();
+        lowpass.type = "lowpass";
+        lowpass.frequency.value = 8000 - settings.audioCrush * 6500;
+
+        const holdFactor = Math.max(1, Math.round(settings.audioCrush * 10));
+        const crusher = audioCtx.createScriptProcessor(4096, 1, 1);
+        let holdCounter = 0;
+        let lastSample = 0;
+        const bitLevels = Math.max(4, Math.round(64 - settings.audioCrush * 56));
+        crusher.onaudioprocess = (e) => {
+          const input = e.inputBuffer.getChannelData(0);
+          const output = e.outputBuffer.getChannelData(0);
+          for (let i = 0; i < input.length; i++) {
+            if (holdCounter % holdFactor === 0) {
+              lastSample = Math.round(input[i] * bitLevels) / bitLevels;
+            }
+            output[i] = lastSample;
+            holdCounter++;
+          }
+        };
+
+        const dest = audioCtx.createMediaStreamDestination();
+        source.connect(lowpass);
+        lowpass.connect(crusher);
+        crusher.connect(dest);
+        crusher.connect(audioCtx.destination); // so user can still hear it live
+        audioTracks = dest.stream.getAudioTracks();
+      }
+
       const combined = new MediaStream([
         canvasStream.getVideoTracks()[0],
         ...audioTracks,
@@ -234,7 +315,12 @@ export default function Page() {
         mimeType = "video/webm";
       }
 
-      const recorder = new MediaRecorder(combined, { mimeType, videoBitsPerSecond: 6_000_000 });
+      const lowBitrate = settings.pixel > 0 || settings.audioCrush > 0;
+      const recorder = new MediaRecorder(combined, {
+        mimeType,
+        videoBitsPerSecond: lowBitrate ? 250_000 : 6_000_000,
+        audioBitsPerSecond: lowBitrate ? 24_000 : 128_000,
+      });
       const chunks = [];
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -266,6 +352,11 @@ export default function Page() {
       recorder.stop();
       await finished;
 
+      if (audioCtxRef.current) {
+        await audioCtxRef.current.close();
+        audioCtxRef.current = null;
+      }
+
       const blob = new Blob(chunks, { type: "video/webm" });
       const url = URL.createObjectURL(blob);
       setOutputURL(url);
@@ -285,12 +376,13 @@ export default function Page() {
         <div style={styles.heroInner}>
           <div style={styles.eyebrow}>// NO SIGNAL — PROSES LOKAL DI PERANGKATMU</div>
           <h1 style={styles.h1}>
-            BURIK<span style={{ color: "var(--amber)" }}>.</span>FX
+            BURIKIN<span style={{ color: "var(--amber)" }}>.</span>
           </h1>
           <p style={styles.tagline}>
-            Tambahin grain, scanline, dan jitter VHS ke videomu. Semua diproses
-            langsung di browser — tidak ada file yang diunggah ke server. Audio
-            tetap utuh.
+            Tambahin grain, scanline, jitter VHS, sampai tampilan video 3GP
+            jadul 144p-ke-bawah lengkap dengan suara yang ikut burik. Semua
+            diproses langsung di browser — tidak ada file yang diunggah ke
+            server.
           </p>
         </div>
       </section>
@@ -323,6 +415,7 @@ export default function Page() {
             <div style={styles.previewWrap}>
               <canvas ref={canvasRef} style={styles.previewCanvas} />
               <canvas ref={noiseRef} style={{ display: "none" }} />
+              <canvas ref={pixelRef} style={{ display: "none" }} />
               <div style={styles.recBadge}>
                 {status === "processing" ? "● REC" : "● PREVIEW"}
               </div>
@@ -354,12 +447,20 @@ export default function Page() {
                 onChange={(v) => updateCustom({ jitter: v })} />
               <Slider label="VIGNETTE" value={settings.vignette} max={0.7} step={0.01}
                 onChange={(v) => updateCustom({ vignette: v })} />
+              <Slider label="PIXELATED (144p--)" value={settings.pixel} max={20} step={1}
+                onChange={(v) => updateCustom({ pixel: v })} />
+              <Slider label="POSTERIZE WARNA" value={settings.posterize} max={32} step={1}
+                onChange={(v) => updateCustom({ posterize: v })} />
+              <Slider label="AUDIO BURIK (bitrate jadul)" value={settings.audioCrush} max={1} step={0.01}
+                onChange={(v) => updateCustom({ audioCrush: v })} />
             </div>
 
             <p style={styles.note}>
               Saat tombol proses ditekan, video akan diputar sekali dari awal sampai
-              akhir untuk direkam ulang dengan efeknya — suara aslinya tetap terpasang
-              di hasil akhir. Jangan tutup tab selama proses berjalan.
+              akhir untuk direkam ulang dengan efeknya. Kalau slider AUDIO BURIK
+              dinaikkan, suaranya juga ikut digilas turun bitrate-nya (lo-fi,
+              kemriyek, kayak audio video 3GP jadul). Jangan tutup tab selama
+              proses berjalan.
             </p>
 
             <button
