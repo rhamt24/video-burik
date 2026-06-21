@@ -340,11 +340,11 @@ export default function Page() {
         <div style={styles.heroInner}>
           <div style={styles.eyebrow}>// NO SIGNAL — PROSES LOKAL DI PERANGKATMU</div>
           <h1 style={styles.h1}>
-            BURIKIN<span style={{ color: "var(--amber)" }}>.</span>
+            BURIKIN-AJA<span style={{ color: "var(--amber)" }}>.</span>
           </h1>
           <p style={styles.tagline}>
-            Bikin video burik natural dari hasil kompresi asli (bukan efek filter). 
-            Resolusi diturunkan, bitrate dicekik, dan framerate dipotong agar persis video repost WhatsApp.
+            Burikin aja, bikin video burik kaya status wa yang di repost berkali-kali 
+  dengan mudah.
           </p>
         </div>
       </section>
@@ -364,7 +364,7 @@ export default function Page() {
 
             <div style={styles.previewWrap}>
               <canvas ref={canvasRef} style={styles.previewCanvas} />
-              <div style={styles.recBadge}>{status === "processing" ? "● REC" : "● PREVIEW"}</div>
+              <div style={styles.recBadge}>{status === "processing" ? "● BURIK" : "● PREVIEW"}</div>
             </div>
 
             <div style={styles.presetRow}>
