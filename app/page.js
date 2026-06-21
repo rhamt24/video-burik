@@ -339,9 +339,22 @@ export default function Page() {
     <main style={styles.main}>
       <header style={styles.headerBar}>
         <div style={styles.credits}>
-          Created by <strong>zals</strong>
           <span style={styles.visitorBadge}>
-            👁️ {visitorCount !== null ? visitorCount : "--"} views
+            <svg 
+              xmlns="http://www.w3.org/2000/svg" 
+              width="16" 
+              height="16" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              stroke="currentColor" 
+              strokeWidth="2" 
+              strokeLinecap="round" 
+              strokeLinejoin="round"
+            >
+              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            {visitorCount !== null ? visitorCount : "--"} Total Pengunjung
           </span>
         </div>
         <a 
@@ -453,7 +466,8 @@ const styles = {
   main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px" },
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
   credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
-  visitorBadge: { background: "var(--panel)", border: "1px solid var(--line)", padding: "4px 8px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
+  // Badge diubah jadi inline-flex untuk merapikan posisi SVG icon mata dengan teks
+  visitorBadge: { display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--panel)", border: "1px solid var(--line)", padding: "6px 10px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
   waLink: { background: "var(--amber)", color: "#000", textDecoration: "none", padding: "6px 12px", fontSize: 11, fontWeight: "bold", borderRadius: 4 },
   hero: { position: "relative", padding: "40px 0 28px", overflow: "hidden", borderBottom: "1px solid var(--line)" },
   heroNoise: { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.5, filter: "contrast(1.4)" },
