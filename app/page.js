@@ -2,20 +2,33 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
+// Satu efek aja: "burik kayak video yang direpost berkali-kali" —
+// mosaic/low-res blur + color banding + grain halus + audio ikut digilas.
+// Tidak ada goyangan/jitter sama sekali.
 const PRESETS = {
-  ringan: { label: "RINGAN", noise: 0.10, scan: 0.10, chroma: 0, jitter: 0, vignette: 0.15, pixel: 0, posterize: 0, audioCrush: 0 },
-  sedang: { label: "SEDANG", noise: 0.22, scan: 0.30, chroma: 1.5, jitter: 1, vignette: 0.30, pixel: 0, posterize: 0, audioCrush: 0 },
-  berat: { label: "BERAT", noise: 0.38, scan: 0.55, chroma: 3.5, jitter: 2.5, vignette: 0.45, pixel: 0, posterize: 0, audioCrush: 0 },
-  jadul3gp: { label: "3GP JADUL", noise: 0.18, scan: 0.15, chroma: 1, jitter: 0.8, vignette: 0.2, pixel: 10, posterize: 16, audioCrush: 0.75 },
-  custom: { label: "CUSTOM", noise: 0.22, scan: 0.30, chroma: 1.5, jitter: 1, vignette: 0.30, pixel: 0, posterize: 0, audioCrush: 0 },
+  ringan: { label: "RINGAN", intensity: 3 },
+  sedang: { label: "SEDANG", intensity: 6 },
+  parah: { label: "PARAH", intensity: 9 },
+  custom: { label: "CUSTOM", intensity: 6 },
 };
+
+function computeParams(intensity) {
+  const i = Math.min(10, Math.max(0.5, intensity));
+  return {
+    blockDivisor: 2 + i * 1.3, // makin besar, makin gede "blok" rendah-resolusinya
+    posterizeLevels: Math.max(4, 26 - i * 2), // makin kecil, makin nge-band warnanya
+    blurPx: 0.2 + i * 0.18, // blur lembut khas video yang udah di-kompres berkali-kali
+    noiseAlpha: 0.02 + i * 0.012, // grain halus sisa kompresi
+    audioCrush: Math.min(1, i / 10),
+  };
+}
 
 export default function Page() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const mosaicRef = useRef(null);
   const noiseRef = useRef(null);
-  const pixelRef = useRef(null);
   const audioCtxRef = useRef(null);
   const rafRef = useRef(null);
   const heroCanvasRef = useRef(null);
@@ -24,13 +37,13 @@ export default function Page() {
   const [videoURL, setVideoURL] = useState(null);
   const [ready, setReady] = useState(false);
   const [presetKey, setPresetKey] = useState("sedang");
-  const [settings, setSettings] = useState(PRESETS.sedang);
+  const [intensity, setIntensity] = useState(PRESETS.sedang.intensity);
   const [status, setStatus] = useState("idle"); // idle | previewing | processing | done | error
   const [progress, setProgress] = useState(0);
   const [outputURL, setOutputURL] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  // ---- hero static noise (decorative, page chrome only) ----
+  // ---- hero static noise (dekorasi halaman saja) ----
   useEffect(() => {
     const canvas = heroCanvasRef.current;
     if (!canvas) return;
@@ -69,97 +82,57 @@ export default function Page() {
 
   const applyPreset = (key) => {
     setPresetKey(key);
-    if (key !== "custom") setSettings(PRESETS[key]);
+    if (key !== "custom") setIntensity(PRESETS[key].intensity);
   };
 
-  const updateCustom = (patch) => {
+  const updateIntensity = (v) => {
     setPresetKey("custom");
-    setSettings((s) => ({ ...s, ...patch }));
+    setIntensity(v);
   };
 
-  // ---- live preview render loop on the working canvas ----
-  const drawFrame = useCallback((bake) => {
+  // ---- render satu frame: mosaic blur + posterize + grain. TIDAK ADA jitter. ----
+  const drawFrame = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
     const ctx = canvas.getContext("2d");
     const w = canvas.width;
     const h = canvas.height;
+    const { blockDivisor, posterizeLevels, blurPx, noiseAlpha } = computeParams(intensity);
+
+    // turunin ke buffer kecil (smoothing nyala = ngeblur/ngerata-in warna,
+    // efeknya seperti video resolusi rendah yang udah berkali-kali di-encode ulang)
+    const mosaic = mosaicRef.current;
+    const mw = Math.max(8, Math.floor(w / blockDivisor));
+    const mh = Math.max(8, Math.floor(h / blockDivisor));
+    if (mosaic.width !== mw || mosaic.height !== mh) {
+      mosaic.width = mw;
+      mosaic.height = mh;
+    }
+    const mctx = mosaic.getContext("2d");
+    mctx.imageSmoothingEnabled = true;
+    mctx.drawImage(video, 0, 0, mw, mh);
+
+    if (posterizeLevels < 24) {
+      const levels = Math.max(4, Math.round(posterizeLevels));
+      const step = 255 / (levels - 1);
+      const imgData = mctx.getImageData(0, 0, mw, mh);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        d[i] = Math.round(Math.round(d[i] / step) * step);
+        d[i + 1] = Math.round(Math.round(d[i + 1] / step) * step);
+        d[i + 2] = Math.round(Math.round(d[i + 2] / step) * step);
+      }
+      mctx.putImageData(imgData, 0, 0);
+    }
 
     ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.filter = `blur(${blurPx}px)`;
+    ctx.drawImage(mosaic, 0, 0, w, h);
+    ctx.filter = "none";
 
-    // jitter (VHS tracking wobble)
-    const jx = settings.jitter ? (Math.random() - 0.5) * settings.jitter * 4 : 0;
-    const jy = settings.jitter ? (Math.random() - 0.5) * settings.jitter * 1.5 : 0;
-    ctx.translate(jx, jy);
-
-    if (settings.pixel > 0) {
-      // downscale to a tiny "144p-and-below" buffer, posterize it there
-      // (cheap, since the buffer is small), then blow it back up with
-      // smoothing disabled so the blocks stay hard-edged like an old codec.
-      const pixelCanvas = pixelRef.current;
-      const blockDivisor = Math.max(2, settings.pixel);
-      const pw = Math.max(8, Math.floor(w / blockDivisor));
-      const ph = Math.max(8, Math.floor(h / blockDivisor));
-      if (pixelCanvas.width !== pw || pixelCanvas.height !== ph) {
-        pixelCanvas.width = pw;
-        pixelCanvas.height = ph;
-      }
-      const pctx = pixelCanvas.getContext("2d");
-      pctx.imageSmoothingEnabled = false;
-      pctx.drawImage(video, 0, 0, pw, ph);
-
-      if (settings.posterize > 0) {
-        const levels = Math.max(2, Math.round(settings.posterize));
-        const step = 255 / (levels - 1);
-        const imgData = pctx.getImageData(0, 0, pw, ph);
-        const d = imgData.data;
-        for (let i = 0; i < d.length; i += 4) {
-          d[i] = Math.round(Math.round(d[i] / step) * step);
-          d[i + 1] = Math.round(Math.round(d[i + 1] / step) * step);
-          d[i + 2] = Math.round(Math.round(d[i + 2] / step) * step);
-        }
-        pctx.putImageData(imgData, 0, 0);
-      }
-
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(pixelCanvas, 0, 0, w, h);
-      ctx.imageSmoothingEnabled = true;
-    } else {
-      ctx.drawImage(video, 0, 0, w, h);
-    }
-
-    // chromatic aberration: tinted offset copies, screen blend
-    if (settings.chroma > 0) {
-      const off = settings.chroma;
-      ctx.globalCompositeOperation = "screen";
-      ctx.globalAlpha = 0.35;
-
-      ctx.save();
-      ctx.translate(off, 0);
-      ctx.fillStyle = "rgba(255,0,60,1)";
-      ctx.globalCompositeOperation = "multiply";
-      ctx.fillRect(0, 0, w, h);
-      ctx.restore();
-
-      ctx.globalCompositeOperation = "screen";
-      ctx.save();
-      ctx.translate(-off, 0);
-      if (settings.pixel > 0) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(pixelRef.current, 0, 0, w, h);
-        ctx.imageSmoothingEnabled = true;
-      } else {
-        ctx.drawImage(video, 0, 0, w, h);
-      }
-      ctx.restore();
-
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
-    }
-
-    // grain / noise
-    if (settings.noise > 0) {
+    if (noiseAlpha > 0) {
       const noiseCanvas = noiseRef.current;
       const nw = Math.max(1, Math.floor(w / 2));
       const nh = Math.max(1, Math.floor(h / 2));
@@ -177,41 +150,16 @@ export default function Page() {
         imgData.data[i + 3] = 255;
       }
       nctx.putImageData(imgData, 0, 0);
-      ctx.globalAlpha = settings.noise;
+      ctx.globalAlpha = noiseAlpha;
       ctx.globalCompositeOperation = "overlay";
       ctx.drawImage(noiseCanvas, 0, 0, w, h);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
     }
 
-    // scanlines (baked into export, not just CSS decoration)
-    if (settings.scan > 0) {
-      ctx.globalAlpha = Math.min(settings.scan, 1);
-      ctx.fillStyle = "#000000";
-      for (let y = 0; y < h; y += 3) {
-        ctx.fillRect(0, y, w, 1);
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    // vignette
-    if (settings.vignette > 0) {
-      const grad = ctx.createRadialGradient(
-        w / 2, h / 2, h * 0.25,
-        w / 2, h / 2, h * 0.75
-      );
-      grad.addColorStop(0, "rgba(0,0,0,0)");
-      grad.addColorStop(1, `rgba(0,0,0,${settings.vignette})`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-    }
-
     ctx.restore();
+  }, [intensity]);
 
-    if (bake) rafRef.current = requestAnimationFrame(() => drawFrame(true));
-  }, [settings]);
-
-  // start a lightweight preview loop once video metadata is ready
   const onLoadedMeta = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -225,16 +173,53 @@ export default function Page() {
 
   useEffect(() => {
     if (status !== "previewing") return;
-    const video = videoRef.current;
-    if (!video) return;
     let raf;
     const loop = () => {
-      drawFrame(false);
+      drawFrame();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [status, drawFrame]);
+
+  // Tunggu video sampai habis dengan AMAN: pakai event 'ended' tapi dikasih
+  // watchdog timer juga. Sebelumnya proses bisa "stuck" selamanya kalau
+  // event 'ended' nggak pernah nyala (durasi video kebaca aneh/Infinity,
+  // tab di-throttle browser, dll). Sekarang ada batas waktu maksimum.
+  const waitForVideoToFinish = (video) => {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(watchdogId);
+        clearInterval(stallId);
+        video.removeEventListener("ended", finish);
+        resolve();
+      };
+
+      video.addEventListener("ended", finish);
+
+      const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : null;
+      const watchdogMs = dur ? dur * 1000 + 6000 : 3 * 60 * 1000;
+      const watchdogId = setTimeout(finish, watchdogMs);
+
+      // deteksi macet: kalau currentTime nggak gerak 4 detik berturut-turut
+      // padahal belum sampai akhir, anggap selesai juga supaya nggak gantung.
+      let lastTime = video.currentTime;
+      let stuckTicks = 0;
+      const stallId = setInterval(() => {
+        if (video.ended || video.paused) return;
+        if (Math.abs(video.currentTime - lastTime) < 0.01) {
+          stuckTicks += 1;
+        } else {
+          stuckTicks = 0;
+          lastTime = video.currentTime;
+        }
+        if (stuckTicks >= 4) finish();
+      }, 1000);
+    });
+  };
 
   const handleProcess = async () => {
     const video = videoRef.current;
@@ -252,6 +237,9 @@ export default function Page() {
     setOutputURL(null);
     setErrorMsg(null);
 
+    let recorder = null;
+    let localRaf = null;
+
     try {
       video.pause();
       video.currentTime = 0;
@@ -265,9 +253,9 @@ export default function Page() {
       const audioStream = video.captureStream();
       let audioTracks = audioStream.getAudioTracks();
 
-      // optionally route audio through a lo-fi chain so it sounds as
-      // burik as the picture: sample-and-hold downsample -> lowpass -> bitcrush
-      if (settings.audioCrush > 0 && audioTracks.length > 0) {
+      const { audioCrush } = computeParams(intensity);
+
+      if (audioCrush > 0 && audioTracks.length > 0) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioCtx();
         audioCtxRef.current = audioCtx;
@@ -275,13 +263,13 @@ export default function Page() {
 
         const lowpass = audioCtx.createBiquadFilter();
         lowpass.type = "lowpass";
-        lowpass.frequency.value = 8000 - settings.audioCrush * 6500;
+        lowpass.frequency.value = 8000 - audioCrush * 6500;
 
-        const holdFactor = Math.max(1, Math.round(settings.audioCrush * 10));
+        const holdFactor = Math.max(1, Math.round(audioCrush * 10));
         const crusher = audioCtx.createScriptProcessor(4096, 1, 1);
         let holdCounter = 0;
         let lastSample = 0;
-        const bitLevels = Math.max(4, Math.round(64 - settings.audioCrush * 56));
+        const bitLevels = Math.max(4, Math.round(64 - audioCrush * 56));
         crusher.onaudioprocess = (e) => {
           const input = e.inputBuffer.getChannelData(0);
           const output = e.outputBuffer.getChannelData(0);
@@ -298,7 +286,6 @@ export default function Page() {
         source.connect(lowpass);
         lowpass.connect(crusher);
         crusher.connect(dest);
-        crusher.connect(audioCtx.destination); // so user can still hear it live
         audioTracks = dest.stream.getAudioTracks();
       }
 
@@ -315,46 +302,49 @@ export default function Page() {
         mimeType = "video/webm";
       }
 
-      const lowBitrate = settings.pixel > 0 || settings.audioCrush > 0;
-      const recorder = new MediaRecorder(combined, {
+      recorder = new MediaRecorder(combined, {
         mimeType,
-        videoBitsPerSecond: lowBitrate ? 250_000 : 6_000_000,
-        audioBitsPerSecond: lowBitrate ? 24_000 : 128_000,
+        videoBitsPerSecond: 280_000,
+        audioBitsPerSecond: 32_000,
       });
+
       const chunks = [];
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunks.push(e.data);
       };
 
-      const finished = new Promise((resolve) => {
+      const stopped = new Promise((resolve) => {
         recorder.onstop = resolve;
       });
 
-      recorder.start();
+      recorder.start(500); // flush chunks tiap 500ms biar nggak numpuk di akhir
 
       const duration = video.duration || 0;
       const tick = () => {
-        drawFrame(false);
+        drawFrame();
         if (duration > 0) {
           setProgress(Math.min(99, Math.round((video.currentTime / duration) * 100)));
         }
-        rafRef.current = requestAnimationFrame(tick);
+        localRaf = requestAnimationFrame(tick);
       };
-      rafRef.current = requestAnimationFrame(tick);
+      localRaf = requestAnimationFrame(tick);
 
       await video.play();
+      await waitForVideoToFinish(video);
 
-      await new Promise((resolve) => {
-        video.onended = resolve;
-      });
+      cancelAnimationFrame(localRaf);
+      localRaf = null;
 
-      cancelAnimationFrame(rafRef.current);
-      recorder.stop();
-      await finished;
+      if (recorder.state !== "inactive") recorder.stop();
+      await stopped;
 
       if (audioCtxRef.current) {
         await audioCtxRef.current.close();
         audioCtxRef.current = null;
+      }
+
+      if (chunks.length === 0) {
+        throw new Error("Tidak ada data yang terekam. Coba ulangi lagi.");
       }
 
       const blob = new Blob(chunks, { type: "video/webm" });
@@ -364,7 +354,15 @@ export default function Page() {
       setStatus("done");
     } catch (err) {
       console.error(err);
-      setErrorMsg("Gagal memproses video: " + (err?.message || "error tidak diketahui"));
+      if (localRaf) cancelAnimationFrame(localRaf);
+      if (recorder && recorder.state !== "inactive") {
+        try { recorder.stop(); } catch (_) {}
+      }
+      if (audioCtxRef.current) {
+        try { await audioCtxRef.current.close(); } catch (_) {}
+        audioCtxRef.current = null;
+      }
+      setErrorMsg("Gagal memproses video: " + (err?.message || "error tidak diketahui") + ". Coba lagi.");
       setStatus("error");
     }
   };
@@ -379,9 +377,9 @@ export default function Page() {
             BURIKIN<span style={{ color: "var(--amber)" }}>.</span>
           </h1>
           <p style={styles.tagline}>
-            Tambahin grain, scanline, jitter VHS, sampai tampilan video 3GP
-            jadul 144p-ke-bawah lengkap dengan suara yang ikut burik. Semua
-            diproses langsung di browser — tidak ada file yang diunggah ke
+            Bikin video jadi burik kayak udah direpost ke grup WhatsApp
+            berkali-kali — blur, warna nge-band, suara ikut pecah. Semua
+            diproses langsung di browser, tidak ada file yang diunggah ke
             server.
           </p>
         </div>
@@ -414,8 +412,8 @@ export default function Page() {
 
             <div style={styles.previewWrap}>
               <canvas ref={canvasRef} style={styles.previewCanvas} />
+              <canvas ref={mosaicRef} style={{ display: "none" }} />
               <canvas ref={noiseRef} style={{ display: "none" }} />
-              <canvas ref={pixelRef} style={{ display: "none" }} />
               <div style={styles.recBadge}>
                 {status === "processing" ? "● REC" : "● PREVIEW"}
               </div>
@@ -437,30 +435,28 @@ export default function Page() {
             </div>
 
             <div style={styles.sliders}>
-              <Slider label="NOISE" value={settings.noise} max={0.6} step={0.01}
-                onChange={(v) => updateCustom({ noise: v })} />
-              <Slider label="SCANLINE" value={settings.scan} max={1} step={0.01}
-                onChange={(v) => updateCustom({ scan: v })} />
-              <Slider label="CHROMATIC AB." value={settings.chroma} max={8} step={0.1}
-                onChange={(v) => updateCustom({ chroma: v })} />
-              <Slider label="JITTER" value={settings.jitter} max={6} step={0.1}
-                onChange={(v) => updateCustom({ jitter: v })} />
-              <Slider label="VIGNETTE" value={settings.vignette} max={0.7} step={0.01}
-                onChange={(v) => updateCustom({ vignette: v })} />
-              <Slider label="PIXELATED (144p--)" value={settings.pixel} max={20} step={1}
-                onChange={(v) => updateCustom({ pixel: v })} />
-              <Slider label="POSTERIZE WARNA" value={settings.posterize} max={32} step={1}
-                onChange={(v) => updateCustom({ posterize: v })} />
-              <Slider label="AUDIO BURIK (bitrate jadul)" value={settings.audioCrush} max={1} step={0.01}
-                onChange={(v) => updateCustom({ audioCrush: v })} />
+              <label style={styles.sliderLabel}>
+                <div style={styles.sliderTop}>
+                  <span>TINGKAT BURIK</span>
+                  <span style={{ color: "var(--amber)" }}>{intensity.toFixed(1)} / 10</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={10}
+                  step={0.1}
+                  value={intensity}
+                  onChange={(e) => updateIntensity(parseFloat(e.target.value))}
+                  style={styles.slider}
+                />
+              </label>
             </div>
 
             <p style={styles.note}>
-              Saat tombol proses ditekan, video akan diputar sekali dari awal sampai
-              akhir untuk direkam ulang dengan efeknya. Kalau slider AUDIO BURIK
-              dinaikkan, suaranya juga ikut digilas turun bitrate-nya (lo-fi,
-              kemriyek, kayak audio video 3GP jadul). Jangan tutup tab selama
-              proses berjalan.
+              Saat tombol proses ditekan, video diputar sekali dari awal sampai
+              akhir untuk direkam ulang dengan efeknya — suaranya juga ikut
+              digilas turun bitrate-nya. Jangan tutup atau pindah tab selama
+              proses berjalan supaya tidak terhenti di tengah jalan.
             </p>
 
             <button
@@ -472,7 +468,7 @@ export default function Page() {
               disabled={!ready || status === "processing"}
               onClick={handleProcess}
             >
-              {status === "processing" ? `MEMPROSES... ${progress}%` : "BIKIN BURIK & DOWNLOAD"}
+              {status === "processing" ? `MEMPROSES... ${progress}%` : "BIKININ & DOWNLOAD"}
             </button>
 
             {errorMsg && <p style={styles.error}>{errorMsg}</p>}
@@ -480,7 +476,7 @@ export default function Page() {
             {outputURL && (
               <div style={styles.resultBox}>
                 <video src={outputURL} controls style={styles.resultVideo} />
-                <a href={outputURL} download="burik-fx.webm" style={styles.downloadLink}>
+                <a href={outputURL} download="burikin.webm" style={styles.downloadLink}>
                   ⬇ DOWNLOAD HASIL (.webm)
                 </a>
               </div>
@@ -493,26 +489,6 @@ export default function Page() {
         diproses 100% di perangkatmu — tidak ada video yang dikirim ke server manapun
       </footer>
     </main>
-  );
-}
-
-function Slider({ label, value, max, step, onChange }) {
-  return (
-    <label style={styles.sliderLabel}>
-      <div style={styles.sliderTop}>
-        <span>{label}</span>
-        <span style={{ color: "var(--amber)" }}>{value.toFixed(2)}</span>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        style={styles.slider}
-      />
-    </label>
   );
 }
 
