@@ -21,6 +21,31 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
+// Komponen Khusus Penampil Iklan AdSense (Aman untuk React)
+function AdBanner({ slotId }) {
+  useEffect(() => {
+    try {
+      (window.adsbygoogle = window.adsbygoogle || []).push({});
+    } catch (err) {
+      console.error("AdSense Error: ", err);
+    }
+  }, []);
+
+  return (
+    <div style={styles.adContainer}>
+      <span style={styles.adLabel}>- Advertisement -</span>
+      <ins
+        className="adsbygoogle"
+        style={{ display: "block" }}
+        data-ad-client="ca-pub-6307870813026612" // ID AdSense kamu
+        data-ad-slot={slotId || "GANTI_DENGAN_SLOT_ID"} // Masukkan Slot ID dari AdSense
+        data-ad-format="auto"
+        data-full-width-responsive="true"
+      ></ins>
+    </div>
+  );
+}
+
 export default function Page() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
@@ -41,17 +66,15 @@ export default function Page() {
   const [visitorCount, setVisitorCount] = useState(null);
   const [presetKey, setPresetKey] = useState("sedang");
 
-  // States Parameter Lanjutan (Kualitas)
+  // States Parameter Lanjutan
   const [resHeight, setResHeight] = useState(240); 
   const [fpsTarget, setFpsTarget] = useState(15); 
   const [videoQuality, setVideoQuality] = useState(2); 
   const [audioQuality, setAudioQuality] = useState(2); 
   
-  // States Parameter Tambahan (Efek Lucu)
   const [pixelScale, setPixelScale] = useState(1); 
   const [stretchFactor, setStretchFactor] = useState(1); 
 
-  // Hitung ulang ukuran canvas (PERBAIKAN BUG GEPENG)
   const updateCanvasSize = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -71,7 +94,6 @@ export default function Page() {
       targetH = targetW / (baseRatio * stretchFactor);
     }
 
-    // ATURAN WAJIB MP4: Harus angka genap
     canvas.width = Math.round(targetW) & ~1;
     canvas.height = Math.round(targetH) & ~1;
   }, [resHeight, stretchFactor]);
@@ -104,7 +126,6 @@ export default function Page() {
     }
   }, [resHeight, fpsTarget, videoQuality, audioQuality, pixelScale, stretchFactor, presetKey]);
 
-  // PERBAIKAN BUG GEPENG: Selalu update canvas kalau parameter diganti, KECUALI saat lagi rekaman
   useEffect(() => {
     if (status !== "processing") {
       updateCanvasSize();
@@ -243,7 +264,6 @@ export default function Page() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    // Pastikan ukuran canvas direset ke yang terbaru sebelum mulai proses (Mencegah nyangkut gepeng)
     updateCanvasSize();
 
     setStatus("processing");
@@ -257,9 +277,6 @@ export default function Page() {
     try {
       video.pause();
       
-      // PERBAIKAN BUG FREEZE 0%:
-      // Kasih batas waktu (timeout) 500ms. Kalau event "seeked" nyangkut gak kepanggil dari browser,
-      // aplikasinya akan tetep lanjut jalan tanpa nge-freeze di 0%.
       await new Promise((res) => {
         let resolved = false;
         const finish = () => {
@@ -273,7 +290,6 @@ export default function Page() {
         video.currentTime = 0;
       });
 
-      // Gambar 1 frame awal buat pancingan
       drawFrame();
 
       const canvasStream = canvas.captureStream(30); 
@@ -330,7 +346,7 @@ export default function Page() {
       setFileExt(ext);
 
       let targetVBitrate = 1_000_000;
-      if (videoQuality === 1) targetVBitrate = 80_000; // Aman dari korup
+      if (videoQuality === 1) targetVBitrate = 80_000; 
       else if (videoQuality === 2) targetVBitrate = 200_000; 
       else if (videoQuality === 3) targetVBitrate = 500_000; 
 
@@ -410,6 +426,13 @@ export default function Page() {
 
   return (
     <main style={styles.main}>
+      {/* SCRIPT UTAMA ADSENSE */}
+      <script 
+        async 
+        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6307870813026612"
+        crossOrigin="anonymous"
+      ></script>
+
       <header style={styles.headerBar}>
         <div style={styles.credits}>
           <span style={styles.visitorBadge}>
@@ -435,6 +458,9 @@ export default function Page() {
           </p>
         </div>
       </section>
+
+      {/* POSISI IKLAN 1: Bawah Judul (Tidak Mengganggu) */}
+      <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_1" />
 
       <section style={styles.panel}>
         <div style={styles.row}>
@@ -564,12 +590,17 @@ export default function Page() {
             {errorMsg && <p style={styles.error}>{errorMsg}</p>}
 
             {outputURL && (
-              <div style={styles.resultBox}>
-                <video src={outputURL} controls style={styles.resultVideo} />
-                <a href={outputURL} download={getOutputFilename()} style={styles.downloadLink}>
-                  ⬇ DOWNLOAD HASIL (.{fileExt})
-                </a>
-              </div>
+              <>
+                <div style={styles.resultBox}>
+                  <video src={outputURL} controls style={styles.resultVideo} />
+                  <a href={outputURL} download={getOutputFilename()} style={styles.downloadLink}>
+                    ⬇ DOWNLOAD HASIL (.{fileExt})
+                  </a>
+                </div>
+
+                {/* POSISI IKLAN 2: Bawah Hasil Download (Aman, Hadiah Pas Selesai) */}
+                <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_2" />
+              </>
             )}
           </>
         )}
@@ -595,6 +626,11 @@ const styles = {
   eyebrow: { fontFamily: "var(--mono-display)", fontSize: 12, letterSpacing: "0.08em", color: "var(--green)", marginBottom: 14 },
   h1: { fontFamily: "var(--mono-display)", fontSize: "clamp(40px, 10vw, 72px)", fontWeight: 800, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 },
   tagline: { marginTop: 14, color: "var(--dim)", fontSize: 14, lineHeight: 1.6, maxWidth: 480 },
+  
+  // Style Khusus Iklan
+  adContainer: { marginTop: 24, marginBottom: 8, padding: 12, background: "rgba(255,255,255,0.03)", border: "1px dashed var(--line)", textAlign: "center", borderRadius: 8 },
+  adLabel: { display: "block", fontSize: 10, color: "var(--dim)", marginBottom: 8, letterSpacing: "0.05em" },
+
   panel: { paddingTop: 28 },
   row: { display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" },
   uploadBtn: { background: "var(--amber)", color: "#000", border: "none", padding: "12px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
