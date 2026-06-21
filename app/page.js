@@ -21,7 +21,7 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
-// Komponen Khusus Penampil Iklan AdSense (Aman untuk React)
+// Komponen Khusus Penampil Iklan AdSense
 function AdBanner({ slotId }) {
   useEffect(() => {
     try {
@@ -37,8 +37,8 @@ function AdBanner({ slotId }) {
       <ins
         className="adsbygoogle"
         style={{ display: "block" }}
-        data-ad-client="ca-pub-6307870813026612" // ID AdSense kamu
-        data-ad-slot={slotId || "GANTI_DENGAN_SLOT_ID"} // Masukkan Slot ID dari AdSense
+        data-ad-client="ca-pub-6307870813026612" // ID AdSense milikmu
+        data-ad-slot={slotId || "GANTI_DENGAN_SLOT_ID_IKLANMU"} // Ganti dengan ID Unit Iklan nanti
         data-ad-format="auto"
         data-full-width-responsive="true"
       ></ins>
@@ -459,7 +459,7 @@ export default function Page() {
         </div>
       </section>
 
-      {/* POSISI IKLAN 1: Bawah Judul (Tidak Mengganggu) */}
+      {/* POSISI IKLAN 1 */}
       <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_1" />
 
       <section style={styles.panel}>
@@ -598,7 +598,7 @@ export default function Page() {
                   </a>
                 </div>
 
-                {/* POSISI IKLAN 2: Bawah Hasil Download (Aman, Hadiah Pas Selesai) */}
+                {/* POSISI IKLAN 2 */}
                 <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_2" />
               </>
             )}
@@ -627,7 +627,6 @@ const styles = {
   h1: { fontFamily: "var(--mono-display)", fontSize: "clamp(40px, 10vw, 72px)", fontWeight: 800, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 },
   tagline: { marginTop: 14, color: "var(--dim)", fontSize: 14, lineHeight: 1.6, maxWidth: 480 },
   
-  // Style Khusus Iklan
   adContainer: { marginTop: 24, marginBottom: 8, padding: 12, background: "rgba(255,255,255,0.03)", border: "1px dashed var(--line)", textAlign: "center", borderRadius: 8 },
   adLabel: { display: "block", fontSize: 10, color: "var(--dim)", marginBottom: 8, letterSpacing: "0.05em" },
 
