@@ -193,9 +193,9 @@ export default function Page() {
 
     // Kumpulan Filter Warna
     let filterStr = `contrast(${contrast}) saturate(${saturate})`;
-    if (colorFilter === 1) filterStr += ' grayscale(100%) contrast(1.2)'; // Majapahit (B&W)
-    else if (colorFilter === 2) filterStr += ' sepia(80%) hue-rotate(-10deg) saturate(1.5)'; // Sepia
-    else if (colorFilter === 3) filterStr += ' saturate(3) contrast(1.5) hue-rotate(20deg)'; // Deep Fried
+    if (colorFilter === 1) filterStr += ' grayscale(100%) contrast(1.2)'; 
+    else if (colorFilter === 2) filterStr += ' sepia(80%) hue-rotate(-10deg) saturate(1.5)'; 
+    else if (colorFilter === 3) filterStr += ' saturate(3) contrast(1.5) hue-rotate(20deg)'; 
 
     if (pixelScale > 1) {
       const pw = Math.max(2, Math.floor(canvas.width / pixelScale));
@@ -223,7 +223,6 @@ export default function Page() {
     setReady(true);
     setStatus("previewing");
     
-    // Fitur Real-Time Preview: Mainkan video secara loop & mute saat preview!
     if (videoRef.current) {
       videoRef.current.loop = true;
       videoRef.current.muted = true;
@@ -231,7 +230,6 @@ export default function Page() {
     }
   };
 
-  // Loop Render
   useEffect(() => {
     if (status !== "previewing" && status !== "processing") return;
     let raf;
@@ -262,7 +260,6 @@ export default function Page() {
       video.addEventListener("ended", finish);
       
       const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : null;
-      // Berikan batas waktu sangat longgar
       const watchdogId = setTimeout(finish, dur ? dur * 1000 + 10000 : 5 * 60 * 1000);
       
       let lastTime = video.currentTime;
@@ -272,7 +269,6 @@ export default function Page() {
         if (Math.abs(video.currentTime - lastTime) < 0.01) stuckTicks++;
         else { stuckTicks = 0; lastTime = video.currentTime; }
         
-        // BUGFIX MACET: Tingkatkan toleransi macet hingga 15 detik agar proses berat tidak tiba-tiba gagal
         if (stuckTicks >= 15) finish(); 
       }, 1000);
     });
@@ -293,9 +289,8 @@ export default function Page() {
     let recorder = null;
 
     try {
-      // Setup ulang video untuk perekaman
       video.pause();
-      video.loop = false; // Matikan loop agar bisa berhenti
+      video.loop = false; 
       
       await new Promise((res) => {
         let resolved = false;
@@ -306,11 +301,11 @@ export default function Page() {
           res();
         };
         video.addEventListener("seeked", finish);
-        setTimeout(finish, 500); // Mencegah bug freeze 0%
+        setTimeout(finish, 500); 
         video.currentTime = 0;
       });
 
-      drawFrame(); // Pancing frame pertama
+      drawFrame(); 
 
       const canvasStream = canvas.captureStream(30); 
       const audioStream = video.captureStream();
@@ -383,17 +378,14 @@ export default function Page() {
 
       const stopped = new Promise(resolve => recorder.onstop = resolve);
       
-      // Mencegah durasi rusak: jangan dipecah per sekian milidetik, rekam satu file utuh!
       recorder.start(); 
 
-      // Untuk mengupdate progress bar
       const progressTimer = setInterval(() => {
         if (video.duration > 0) {
           setProgress(Math.min(99, Math.round((video.currentTime / video.duration) * 100)));
         }
       }, 500);
 
-      // Mulai mainkan videonya agar terekam ke kanvas
       await video.play();
       await waitForVideoToFinish(video);
 
@@ -415,7 +407,6 @@ export default function Page() {
       setProgress(100);
       setStatus("done");
 
-      // Kembalikan ke mode preview
       video.loop = true;
       video.muted = true;
       video.play().catch(()=>{});
@@ -446,6 +437,7 @@ export default function Page() {
 
   return (
     <main style={styles.main}>
+      {/* SCRIPT UTAMA ADSENSE DITAMBAHKAN KEMBALI DI SINI */}
       <script 
         async 
         src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6307870813026612"
@@ -675,7 +667,6 @@ const styles = {
   previewCanvas: { width: "100%", height: "auto", maxHeight: "65vh", objectFit: "contain", display: "block" },
   recBadge: { position: "absolute", top: 8, right: 10, fontFamily: "var(--mono-display)", fontSize: 11, color: "var(--danger)", background: "rgba(0,0,0,0.6)", padding: "2px 6px", borderRadius: 4 },
   
-  // Overlay khusus untuk mencegah user ngaco pas lagi render
   processingOverlay: { position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10, textAlign: "center", padding: 20 },
   spinner: { width: 40, height: 40, border: "4px solid rgba(255,255,255,0.2)", borderTopColor: "var(--amber)", borderRadius: "50%", animation: "spin 1s linear infinite" },
 
@@ -696,7 +687,6 @@ const styles = {
   footer: { marginTop: 50, color: "var(--dim)", fontSize: 12, textAlign: "center", lineHeight: 1.6 }
 };
 
-// Keyframe ditambahkan untuk spinner loading di React secara aman
 if (typeof document !== 'undefined') {
   const style = document.createElement('style');
   style.innerHTML = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
