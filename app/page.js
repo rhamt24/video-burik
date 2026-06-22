@@ -4,9 +4,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 // Preset mengubah state secara spesifik
 const PRESETS = {
-  ringan: { label: "RINGAN", res: 360, fps: 24, vQuality: 3, aQuality: 3, pixel: 1, stretch: 1 },
-  sedang: { label: "SEDANG", res: 240, fps: 15, vQuality: 2, aQuality: 2, pixel: 1, stretch: 1 },
-  parah: { label: "PARAH", res: 144, fps: 8, vQuality: 1, aQuality: 1, pixel: 2, stretch: 1 },
+  ringan: { label: "RINGAN", res: 360, fps: 24, vQuality: 3, aQuality: 3, pixel: 1, stretch: 1, color: 0 },
+  sedang: { label: "SEDANG", res: 240, fps: 15, vQuality: 2, aQuality: 2, pixel: 1, stretch: 1, color: 0 },
+  parah: { label: "PARAH", res: 144, fps: 8, vQuality: 1, aQuality: 1, pixel: 2, stretch: 1, color: 0 },
+  majapahit: { label: "MAJAPAHIT", res: 144, fps: 12, vQuality: 1, aQuality: 2, pixel: 1, stretch: 1, color: 1 },
 };
 
 function makeDistortionCurve(amount) {
@@ -37,8 +38,8 @@ function AdBanner({ slotId }) {
       <ins
         className="adsbygoogle"
         style={{ display: "block" }}
-        data-ad-client="ca-pub-6307870813026612" // ID AdSense milikmu
-        data-ad-slot={slotId || "GANTI_DENGAN_SLOT_ID_IKLANMU"} // Ganti dengan ID Unit Iklan nanti
+        data-ad-client="ca-pub-6307870813026612" 
+        data-ad-slot={slotId || "GANTI_DENGAN_SLOT_ID_IKLANMU"} 
         data-ad-format="auto"
         data-full-width-responsive="true"
       ></ins>
@@ -74,6 +75,7 @@ export default function Page() {
   
   const [pixelScale, setPixelScale] = useState(1); 
   const [stretchFactor, setStretchFactor] = useState(1); 
+  const [colorFilter, setColorFilter] = useState(0); // 0: Normal, 1: Majapahit, 2: Sepia, 3: Deep Fried
 
   const updateCanvasSize = useCallback(() => {
     const video = videoRef.current;
@@ -107,6 +109,7 @@ export default function Page() {
       setAudioQuality(PRESETS[key].aQuality);
       setPixelScale(PRESETS[key].pixel);
       setStretchFactor(PRESETS[key].stretch);
+      setColorFilter(PRESETS[key].color);
     }
   };
 
@@ -119,12 +122,13 @@ export default function Page() {
         videoQuality !== p.vQuality ||
         audioQuality !== p.aQuality ||
         pixelScale !== p.pixel ||
-        stretchFactor !== p.stretch
+        stretchFactor !== p.stretch ||
+        colorFilter !== p.color
       ) {
         setPresetKey("custom");
       }
     }
-  }, [resHeight, fpsTarget, videoQuality, audioQuality, pixelScale, stretchFactor, presetKey]);
+  }, [resHeight, fpsTarget, videoQuality, audioQuality, pixelScale, stretchFactor, colorFilter, presetKey]);
 
   useEffect(() => {
     if (status !== "processing") {
@@ -187,6 +191,12 @@ export default function Page() {
     const contrast = videoQuality === 1 ? 1.15 : videoQuality === 2 ? 1.05 : 1;
     const saturate = videoQuality === 1 ? 1.2 : videoQuality === 2 ? 1.1 : 1;
 
+    // Kumpulan Filter Warna
+    let filterStr = `contrast(${contrast}) saturate(${saturate})`;
+    if (colorFilter === 1) filterStr += ' grayscale(100%) contrast(1.2)'; // Majapahit (B&W)
+    else if (colorFilter === 2) filterStr += ' sepia(80%) hue-rotate(-10deg) saturate(1.5)'; // Sepia
+    else if (colorFilter === 3) filterStr += ' saturate(3) contrast(1.5) hue-rotate(20deg)'; // Deep Fried
+
     if (pixelScale > 1) {
       const pw = Math.max(2, Math.floor(canvas.width / pixelScale));
       const ph = Math.max(2, Math.floor(canvas.height / pixelScale));
@@ -199,26 +209,31 @@ export default function Page() {
       pCtx.drawImage(video, 0, 0, pw, ph);
 
       ctx.imageSmoothingEnabled = false;
-      ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
+      ctx.filter = filterStr;
       ctx.drawImage(pCanvas, 0, 0, pw, ph, 0, 0, canvas.width, canvas.height);
     } else {
       ctx.imageSmoothingEnabled = true;
-      ctx.filter = `contrast(${contrast}) saturate(${saturate})`;
+      ctx.filter = filterStr;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     }
-  }, [videoQuality, pixelScale]);
+  }, [videoQuality, pixelScale, colorFilter]);
 
   const onLoadedMeta = () => {
     updateCanvasSize();
     setReady(true);
     setStatus("previewing");
+    
+    // Fitur Real-Time Preview: Mainkan video secara loop & mute saat preview!
     if (videoRef.current) {
-      videoRef.current.currentTime = Math.min(0.2, videoRef.current.duration || 0);
+      videoRef.current.loop = true;
+      videoRef.current.muted = true;
+      videoRef.current.play().catch(e => console.log("Auto-play preview tertahan browser", e));
     }
   };
 
+  // Loop Render
   useEffect(() => {
-    if (status !== "previewing") return;
+    if (status !== "previewing" && status !== "processing") return;
     let raf;
     let lastDraw = 0;
     const loop = (timestamp) => {
@@ -245,8 +260,10 @@ export default function Page() {
         resolve();
       };
       video.addEventListener("ended", finish);
+      
       const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : null;
-      const watchdogId = setTimeout(finish, dur ? dur * 1000 + 5000 : 3 * 60 * 1000);
+      // Berikan batas waktu sangat longgar
+      const watchdogId = setTimeout(finish, dur ? dur * 1000 + 10000 : 5 * 60 * 1000);
       
       let lastTime = video.currentTime;
       let stuckTicks = 0;
@@ -254,7 +271,9 @@ export default function Page() {
         if (video.ended || video.paused) return;
         if (Math.abs(video.currentTime - lastTime) < 0.01) stuckTicks++;
         else { stuckTicks = 0; lastTime = video.currentTime; }
-        if (stuckTicks >= 4) finish();
+        
+        // BUGFIX MACET: Tingkatkan toleransi macet hingga 15 detik agar proses berat tidak tiba-tiba gagal
+        if (stuckTicks >= 15) finish(); 
       }, 1000);
     });
   };
@@ -272,10 +291,11 @@ export default function Page() {
     setErrorMsg(null);
 
     let recorder = null;
-    let localRaf = null;
 
     try {
+      // Setup ulang video untuk perekaman
       video.pause();
+      video.loop = false; // Matikan loop agar bisa berhenti
       
       await new Promise((res) => {
         let resolved = false;
@@ -286,11 +306,11 @@ export default function Page() {
           res();
         };
         video.addEventListener("seeked", finish);
-        setTimeout(finish, 500); 
+        setTimeout(finish, 500); // Mencegah bug freeze 0%
         video.currentTime = 0;
       });
 
-      drawFrame();
+      drawFrame(); // Pancing frame pertama
 
       const canvasStream = canvas.captureStream(30); 
       const audioStream = video.captureStream();
@@ -362,28 +382,23 @@ export default function Page() {
       };
 
       const stopped = new Promise(resolve => recorder.onstop = resolve);
+      
+      // Mencegah durasi rusak: jangan dipecah per sekian milidetik, rekam satu file utuh!
       recorder.start(); 
 
-      const duration = video.duration || 0;
-      let lastDraw = 0;
-      
-      const tick = (timestamp) => {
-        const interval = 1000 / fpsTarget;
-        if (timestamp - lastDraw >= interval) {
-          drawFrame(); 
-          lastDraw = timestamp;
+      // Untuk mengupdate progress bar
+      const progressTimer = setInterval(() => {
+        if (video.duration > 0) {
+          setProgress(Math.min(99, Math.round((video.currentTime / video.duration) * 100)));
         }
-        if (duration > 0) {
-          setProgress(Math.min(99, Math.round((video.currentTime / duration) * 100)));
-        }
-        localRaf = requestAnimationFrame(tick);
-      };
-      localRaf = requestAnimationFrame(tick);
+      }, 500);
 
+      // Mulai mainkan videonya agar terekam ke kanvas
       await video.play();
       await waitForVideoToFinish(video);
 
-      cancelAnimationFrame(localRaf);
+      clearInterval(progressTimer);
+
       if (recorder.state !== "inactive") recorder.stop();
       await stopped;
 
@@ -392,7 +407,7 @@ export default function Page() {
         audioCtxRef.current = null;
       }
 
-      if (chunks.length === 0) throw new Error("Gagal merekam data");
+      if (chunks.length === 0) throw new Error("Gagal merekam data. Pastikan kamu tidak pindah tab.");
 
       const blob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(blob);
@@ -400,9 +415,13 @@ export default function Page() {
       setProgress(100);
       setStatus("done");
 
+      // Kembalikan ke mode preview
+      video.loop = true;
+      video.muted = true;
+      video.play().catch(()=>{});
+
     } catch (err) {
       console.error(err);
-      if (localRaf) cancelAnimationFrame(localRaf);
       if (recorder && recorder.state !== "inactive") try { recorder.stop(); } catch (_) {}
       if (audioCtxRef.current) {
         try { await audioCtxRef.current.close(); } catch (_) {}
@@ -419,6 +438,7 @@ export default function Page() {
     const baseName = dotIndex !== -1 ? fileName.substring(0, dotIndex) : fileName;
     
     let affix = "_burik";
+    if (colorFilter === 1) affix += "_majapahit";
     if (stretchFactor > 1) affix += "_gepeng";
     
     return `${baseName}${affix}.${fileExt}`;
@@ -426,7 +446,6 @@ export default function Page() {
 
   return (
     <main style={styles.main}>
-      {/* SCRIPT UTAMA ADSENSE */}
       <script 
         async 
         src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6307870813026612"
@@ -459,7 +478,6 @@ export default function Page() {
         </div>
       </section>
 
-      {/* POSISI IKLAN 1 */}
       <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_1" />
 
       <section style={styles.panel}>
@@ -475,10 +493,20 @@ export default function Page() {
           <>
             <video ref={videoRef} src={videoURL} onLoadedMetadata={onLoadedMeta} style={{ display: "none" }} playsInline muted />
 
+            {/* AREA PREVIEW */}
             <div style={styles.previewWrap}>
+              {status === "processing" && (
+                <div style={styles.processingOverlay}>
+                  <div style={styles.spinner}></div>
+                  <h3 style={{ color: "var(--amber)", margin: "10px 0 5px" }}>MEMPROSES: {progress}%</h3>
+                  <p style={{ color: "#fff", fontSize: 12, lineHeight: 1.5 }}>
+                    ⚠️ <b>PENTING:</b> Jangan pindah tab browser atau mematikan layar HP selama proses ini berjalan. <br/> Jika dipindah, durasi video akan terpotong / menjadi 1 detik.
+                  </p>
+                </div>
+              )}
               <canvas ref={canvasRef} style={styles.previewCanvas} />
               <canvas ref={pixelCanvasRef} style={{ display: "none" }} />
-              <div style={styles.recBadge}>{status === "processing" ? "● BURIK" : "● PREVIEW"}</div>
+              <div style={styles.recBadge}>{status === "processing" ? "● REC" : "● LIVE PREVIEW"}</div>
             </div>
 
             <div style={styles.presetRow}>
@@ -549,6 +577,16 @@ export default function Page() {
 
               <div style={styles.setSectionGroup}>
                 <div style={styles.setSectionTitle}>👽 EFEK ABSURD</div>
+
+                <label style={styles.setLabel}>
+                  <span style={styles.setTitle}>Filter Warna</span>
+                  <select style={styles.setSelect} value={colorFilter} onChange={(e) => setColorFilter(Number(e.target.value))}>
+                    <option value={0}>Normal (Asli)</option>
+                    <option value={1}>Majapahit (Hitam Putih)</option>
+                    <option value={2}>Vintage (Sepia Usang)</option>
+                    <option value={3}>Deep Fried (Ngejreng Parah)</option>
+                  </select>
+                </label>
                 
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Kotak-Kotak (Pixel)</span>
@@ -562,7 +600,7 @@ export default function Page() {
                 </label>
 
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Rasio Video (Gepengin Wkwk)</span>
+                  <span style={styles.setTitle}>Rasio Video (Gepengin)</span>
                   <select style={styles.setSelect} value={stretchFactor} onChange={(e) => setStretchFactor(Number(e.target.value))}>
                     <option value={0.5}>Kurus Kering (Tinggi)</option>
                     <option value={1}>Normal (Sesuai Asli)</option>
@@ -598,7 +636,6 @@ export default function Page() {
                   </a>
                 </div>
 
-                {/* POSISI IKLAN 2 */}
                 <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_2" />
               </>
             )}
@@ -634,9 +671,14 @@ const styles = {
   row: { display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" },
   uploadBtn: { background: "var(--amber)", color: "#000", border: "none", padding: "12px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
   fileName: { color: "var(--dim)", fontSize: 13, wordBreak: "break-all" },
-  previewWrap: { position: "relative", marginTop: 22, border: "1px solid var(--line)", background: "#000", display: "flex", justifyContent: "center" },
+  previewWrap: { position: "relative", marginTop: 22, border: "1px solid var(--line)", background: "#000", display: "flex", justifyContent: "center", overflow: "hidden" },
   previewCanvas: { width: "100%", height: "auto", maxHeight: "65vh", objectFit: "contain", display: "block" },
-  recBadge: { position: "absolute", top: 8, right: 10, fontFamily: "var(--mono-display)", fontSize: 11, color: "var(--danger)" },
+  recBadge: { position: "absolute", top: 8, right: 10, fontFamily: "var(--mono-display)", fontSize: 11, color: "var(--danger)", background: "rgba(0,0,0,0.6)", padding: "2px 6px", borderRadius: 4 },
+  
+  // Overlay khusus untuk mencegah user ngaco pas lagi render
+  processingOverlay: { position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10, textAlign: "center", padding: 20 },
+  spinner: { width: 40, height: 40, border: "4px solid rgba(255,255,255,0.2)", borderTopColor: "var(--amber)", borderRadius: "50%", animation: "spin 1s linear infinite" },
+
   presetRow: { display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" },
   presetBtn: { background: "var(--panel)", border: "1px solid var(--line)", color: "var(--dim)", padding: "8px 14px", fontSize: 12, cursor: "pointer" },
   presetBtnActive: { borderColor: "var(--amber)", color: "var(--amber)" },
@@ -653,3 +695,10 @@ const styles = {
   downloadLink: { display: "inline-block", marginTop: 14, color: "var(--amber)", fontFamily: "var(--mono-display)", fontSize: 13, textDecoration: "none", border: "1px solid var(--amber)", padding: "10px 16px" },
   footer: { marginTop: 50, color: "var(--dim)", fontSize: 12, textAlign: "center", lineHeight: 1.6 }
 };
+
+// Keyframe ditambahkan untuk spinner loading di React secara aman
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
+  document.head.appendChild(style);
+}
