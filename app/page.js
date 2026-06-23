@@ -39,7 +39,7 @@ function AdBanner({ slotId }) {
         className="adsbygoogle"
         style={{ display: "block" }}
         data-ad-client="ca-pub-6307870813026612" 
-        data-ad-slot={slotId || "GANTI_DENGAN_SLOT_ID_IKLANMU"} 
+        data-ad-slot={slotId} 
         data-ad-format="auto"
         data-full-width-responsive="true"
       ></ins>
@@ -191,7 +191,6 @@ export default function Page() {
     const contrast = videoQuality === 1 ? 1.15 : videoQuality === 2 ? 1.05 : 1;
     const saturate = videoQuality === 1 ? 1.2 : videoQuality === 2 ? 1.1 : 1;
 
-    // Kumpulan Filter Warna
     let filterStr = `contrast(${contrast}) saturate(${saturate})`;
     if (colorFilter === 1) filterStr += ' grayscale(100%) contrast(1.2)'; 
     else if (colorFilter === 2) filterStr += ' sepia(80%) hue-rotate(-10deg) saturate(1.5)'; 
@@ -437,7 +436,7 @@ export default function Page() {
 
   return (
     <main style={styles.main}>
-      {/* SCRIPT UTAMA ADSENSE DITAMBAHKAN KEMBALI DI SINI */}
+      {/* SCRIPT UTAMA ADSENSE */}
       <script 
         async 
         src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6307870813026612"
@@ -470,7 +469,8 @@ export default function Page() {
         </div>
       </section>
 
-      <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_1" />
+      {/* POSISI IKLAN 1 DENGAN ID SLOT 9626464764 */}
+      <AdBanner slotId="9626464764" />
 
       <section style={styles.panel}>
         <div style={styles.row}>
@@ -520,10 +520,8 @@ export default function Page() {
             </div>
 
             <div style={styles.settingsGrid}>
-              
               <div style={styles.setSectionGroup}>
                 <div style={styles.setSectionTitle}>🛠️ VISUAL & AUDIO</div>
-                
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Resolusi Output</span>
                   <select style={styles.setSelect} value={resHeight} onChange={(e) => setResHeight(Number(e.target.value))}>
@@ -534,7 +532,6 @@ export default function Page() {
                     <option value={0}>Sesuai Ukuran Asli</option>
                   </select>
                 </label>
-
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Frame Rate (FPS)</span>
                   <select style={styles.setSelect} value={fpsTarget} onChange={(e) => setFpsTarget(Number(e.target.value))}>
@@ -545,7 +542,6 @@ export default function Page() {
                     <option value={30}>30 FPS (Lancar)</option>
                   </select>
                 </label>
-
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Kompresi Video (Bitrate)</span>
                   <select style={styles.setSelect} value={videoQuality} onChange={(e) => setVideoQuality(Number(e.target.value))}>
@@ -555,7 +551,6 @@ export default function Page() {
                     <option value={4}>Sangat Bagus (Jernih)</option>
                   </select>
                 </label>
-
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Kualitas Suara (Audio)</span>
                   <select style={styles.setSelect} value={audioQuality} onChange={(e) => setAudioQuality(Number(e.target.value))}>
@@ -569,7 +564,6 @@ export default function Page() {
 
               <div style={styles.setSectionGroup}>
                 <div style={styles.setSectionTitle}>👽 EFEK ABSURD</div>
-
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Filter Warna</span>
                   <select style={styles.setSelect} value={colorFilter} onChange={(e) => setColorFilter(Number(e.target.value))}>
@@ -579,7 +573,6 @@ export default function Page() {
                     <option value={3}>Deep Fried (Ngejreng Parah)</option>
                   </select>
                 </label>
-                
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Kotak-Kotak (Pixel)</span>
                   <select style={styles.setSelect} value={pixelScale} onChange={(e) => setPixelScale(Number(e.target.value))}>
@@ -590,7 +583,6 @@ export default function Page() {
                     <option value={16}>Kotak Raksasa (Minecraft)</option>
                   </select>
                 </label>
-
                 <label style={styles.setLabel}>
                   <span style={styles.setTitle}>Rasio Video (Gepengin)</span>
                   <select style={styles.setSelect} value={stretchFactor} onChange={(e) => setStretchFactor(Number(e.target.value))}>
@@ -602,7 +594,6 @@ export default function Page() {
                   </select>
                 </label>
               </div>
-
             </div>
 
             <button
@@ -627,17 +618,69 @@ export default function Page() {
                     ⬇ DOWNLOAD HASIL (.{fileExt})
                   </a>
                 </div>
-
-                <AdBanner slotId="GANTI_DENGAN_SLOT_IKLAN_2" />
+                {/* POSISI IKLAN 2 DENGAN ID SLOT 9626464764 */}
+                <AdBanner slotId="9626464764" />
               </>
             )}
           </>
         )}
       </section>
 
+      {/* SEKSI BARU UNTUK KONTEN SEO & ADSENSE COMPLIANCE */}
+      <section style={styles.seoArticle}>
+        <div style={styles.seoContent}>
+          <h2 style={styles.seoH2}>Tentang Burikin Aja</h2>
+          <p style={styles.seoP}>
+            <strong>Burikin Aja</strong> adalah sebuah *web app* gratis untuk mengedit dan menurunkan kualitas video secara sengaja. 
+            Ingin membuat video terlihat seperti direkam menggunakan HP jadul, hasil kiriman WhatsApp yang di-<em>forward</em> berkali-kali, atau membuat meme absurd dengan rasio layar gepeng? Kamu berada di tempat yang tepat.
+          </p>
+          <p style={styles.seoP}>
+            Aplikasi ini berjalan <strong>100% secara lokal di browser (client-side)</strong>. Kami tidak pernah mengunggah, menyimpan, atau menyebarkan video Anda ke server mana pun, sehingga <strong>privasi dan keamanan data Anda terjamin sepenuhnya</strong>.
+          </p>
+
+          <h3 style={styles.seoH3}>Fitur Utama & Kustomisasi</h3>
+          <ul style={styles.seoUl}>
+            <li style={styles.seoLi}><strong>Turunkan Resolusi & Bitrate:</strong> Paksa video resolusi tinggi menjadi buram, patah-patah, dan penuh kotak pixel art (kompresi parah).</li>
+            <li style={styles.seoLi}><strong>Efek Audio Rusak:</strong> Buat suara video terdengar "mendem", pecah, atau seperti kualitas rekaman kaset rusak.</li>
+            <li style={styles.seoLi}><strong>Gepengin Video (Aspect Ratio):</strong> Ubah bentuk video normal menjadi super lebar (wide) atau sangat kurus memanjang untuk kebutuhan konten meme.</li>
+            <li style={styles.seoLi}><strong>Filter Visual Majapahit:</strong> Terapkan filter *grayscale* ekstrem atau *Deep Fried* yang mencolok langsung saat diproses.</li>
+          </ul>
+
+          <h3 style={styles.seoH3}>Cara Penggunaan</h3>
+          <ol style={styles.seoOl}>
+            <li style={styles.seoLi}>Klik tombol <strong>PILIH VIDEO</strong> dan masukkan video dari galeri HP atau komputer Anda.</li>
+            <li style={styles.seoLi}>Perhatikan <strong>Live Preview</strong> untuk melihat efek secara langsung.</li>
+            <li style={styles.seoLi}>Pilih *Preset* (Ringan, Sedang, Parah, Majapahit) atau atur sendiri parameter di bagian bawah sesuka hati.</li>
+            <li style={styles.seoLi}>Klik <strong>BIKININ & DOWNLOAD</strong>. <em>Catatan: Tetap berada di halaman ini selama proses berjalan agar durasi video tidak terpotong.</em></li>
+          </ol>
+
+          <h3 style={styles.seoH3}>Pertanyaan Umum (FAQ)</h3>
+          <div style={styles.faqBox}>
+            <p style={styles.seoP}><strong>T: Mengapa durasi video hasil download saya hanya 1 detik?</strong><br/>
+            J: Hal ini terjadi karena Anda memindahkan *tab browser* atau menutup layar saat video sedang diproses. Browser modern akan menghentikan perekaman kanvas saat aplikasi berjalan di *background* untuk menghemat baterai.</p>
+            
+            <p style={styles.seoP}><strong>T: Apakah layanan ini gratis? Apakah ada batas durasi?</strong><br/>
+            J: Sepenuhnya gratis! Namun disarankan memproses video berdurasi di bawah 3 menit, karena proses *encoding* mengandalkan tenaga GPU dan CPU dari perangkat yang Anda gunakan.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* FOOTER BARU DENGAN NAVIGASI LEGAL UNTUK ADSENSE */}
       <footer style={styles.footer}>
-        Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br/>
-        <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{color: "var(--amber)", textDecoration: "none"}}>Gabung Saluran WhatsApp</a>
+        <div style={styles.footerNav}>
+          <a href="#" style={styles.footerLink}>Privacy Policy</a>
+          <span style={styles.footerDot}>•</span>
+          <a href="#" style={styles.footerLink}>Terms of Service</a>
+          <span style={styles.footerDot}>•</span>
+          <a href="#" style={styles.footerLink}>Contact Us</a>
+          <span style={styles.footerDot}>•</span>
+          <a href="#" style={styles.footerLink}>About</a>
+        </div>
+        <p style={{ marginTop: 16 }}>
+          Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br/>
+          <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{color: "var(--amber)", textDecoration: "none"}}>Gabung Saluran WhatsApp</a>
+        </p>
+        <p style={{ marginTop: 8, fontSize: 10, color: "var(--dim)", opacity: 0.7 }}>© {new Date().getFullYear()} Burikin Aja. All rights reserved.</p>
       </footer>
     </main>
   );
@@ -684,7 +727,21 @@ const styles = {
   resultBox: { marginTop: 26, border: "1px solid var(--line)", padding: 16, background: "var(--panel)" },
   resultVideo: { width: "100%", height: "auto", maxHeight: "65vh", objectFit: "contain", display: "block", background: "#000" },
   downloadLink: { display: "inline-block", marginTop: 14, color: "var(--amber)", fontFamily: "var(--mono-display)", fontSize: 13, textDecoration: "none", border: "1px solid var(--amber)", padding: "10px 16px" },
-  footer: { marginTop: 50, color: "var(--dim)", fontSize: 12, textAlign: "center", lineHeight: 1.6 }
+  
+  seoArticle: { marginTop: 40, borderTop: "1px solid var(--line)", paddingTop: 30 },
+  seoContent: { background: "var(--panel)", border: "1px solid var(--line)", padding: 24, borderRadius: 8 },
+  seoH2: { fontSize: 18, color: "var(--amber)", marginBottom: 12, fontFamily: "var(--mono-display)" },
+  seoH3: { fontSize: 15, color: "var(--green)", marginTop: 24, marginBottom: 10, fontFamily: "var(--mono-display)" },
+  seoP: { fontSize: 13, color: "var(--dim)", lineHeight: 1.6, marginBottom: 12 },
+  seoUl: { paddingLeft: 20, marginBottom: 16 },
+  seoOl: { paddingLeft: 20, marginBottom: 16 },
+  seoLi: { fontSize: 13, color: "var(--dim)", lineHeight: 1.6, marginBottom: 6 },
+  faqBox: { borderLeft: "3px solid var(--amber)", paddingLeft: 14, marginTop: 10 },
+
+  footer: { marginTop: 50, color: "var(--dim)", fontSize: 12, textAlign: "center", lineHeight: 1.6, paddingBottom: 20 },
+  footerNav: { display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 },
+  footerLink: { color: "var(--text)", textDecoration: "none", fontWeight: "bold" },
+  footerDot: { color: "var(--line)" },
 };
 
 if (typeof document !== 'undefined') {
