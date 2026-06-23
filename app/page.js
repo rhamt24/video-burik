@@ -66,6 +66,9 @@ export default function Page() {
   const [fileExt, setFileExt] = useState("mp4");
   const [visitorCount, setVisitorCount] = useState(null);
   const [presetKey, setPresetKey] = useState("sedang");
+  
+  // State untuk Popup Legal
+  const [activeModal, setActiveModal] = useState(null); 
 
   // States Parameter Lanjutan
   const [resHeight, setResHeight] = useState(240); 
@@ -75,7 +78,7 @@ export default function Page() {
   
   const [pixelScale, setPixelScale] = useState(1); 
   const [stretchFactor, setStretchFactor] = useState(1); 
-  const [colorFilter, setColorFilter] = useState(0); // 0: Normal, 1: Majapahit, 2: Sepia, 3: Deep Fried
+  const [colorFilter, setColorFilter] = useState(0);
 
   const updateCanvasSize = useCallback(() => {
     const video = videoRef.current;
@@ -434,15 +437,67 @@ export default function Page() {
     return `${baseName}${affix}.${fileExt}`;
   };
 
+  // Fungsi Helper untuk Konten Modal
+  const renderModalContent = () => {
+    switch (activeModal) {
+      case "privacy":
+        return (
+          <>
+            <h2 style={styles.modalTitle}>Privacy Policy</h2>
+            <p style={styles.modalText}>
+              Privasi Anda sangat penting bagi kami. Aplikasi <strong>Burikin Aja</strong> dirancang untuk memproses seluruh manipulasi video secara 100% lokal di perangkat Anda (client-side). 
+            </p>
+            <p style={styles.modalText}>
+              Kami <strong>tidak pernah</strong> mengunggah, menyimpan, atau membagikan file video Anda ke server kami atau pihak ketiga mana pun. Semua pemrosesan menggunakan tenaga CPU dan GPU browser Anda secara langsung. Oleh karena itu, data Anda terjamin keamanannya dan tidak akan meninggalkan perangkat Anda.
+            </p>
+          </>
+        );
+      case "tos":
+        return (
+          <>
+            <h2 style={styles.modalTitle}>Terms of Service</h2>
+            <p style={styles.modalText}>
+              Dengan menggunakan layanan <strong>Burikin Aja</strong>, Anda setuju untuk menggunakan alat ini secara bertanggung jawab.
+            </p>
+            <p style={styles.modalText}>
+              Layanan ini disediakan "sebagaimana adanya" (as is) tanpa jaminan apa pun, baik tersurat maupun tersirat. Kami tidak bertanggung jawab atas hasil editan video yang diubah pengguna atau kerusakan file yang terjadi selama proses rendering di perangkat Anda. Pengguna dilarang memproses materi ilegal atau yang melanggar hukum hak cipta.
+            </p>
+          </>
+        );
+      case "contact":
+        return (
+          <>
+            <h2 style={styles.modalTitle}>Contact Us</h2>
+            <p style={styles.modalText}>
+              Punya pertanyaan, saran, atau menemukan bug? Kami sangat terbuka untuk menerima *feedback* dari Anda!
+            </p>
+            <p style={styles.modalText}>
+              Silakan hubungi kami atau bergabung ke komunitas melalui Saluran WhatsApp resmi kami:
+            </p>
+            <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{...styles.waLink, display: "inline-block", marginTop: 10}}>
+              Bergabung ke Komunitas WhatsApp
+            </a>
+          </>
+        );
+      case "about":
+        return (
+          <>
+            <h2 style={styles.modalTitle}>About Us</h2>
+            <p style={styles.modalText}>
+              <strong>Burikin Aja</strong> adalah proyek independen yang dibangun oleh <strong>zals</strong>. 
+            </p>
+            <p style={styles.modalText}>
+              Terinspirasi dari tren meme video dengan kualitas rendah (buram, patah-patah, gepeng), alat ini diciptakan untuk memudahkan siapa saja membuat video "shitpost" atau retro tanpa perlu menggunakan software editing berat. Semua dapat dilakukan langsung dari browser web favorit Anda secara gratis.
+            </p>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <main style={styles.main}>
-      {/* SCRIPT UTAMA ADSENSE */}
-      <script 
-        async 
-        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6307870813026612"
-        crossOrigin="anonymous"
-      ></script>
-
       <header style={styles.headerBar}>
         <div style={styles.credits}>
           <span style={styles.visitorBadge}>
@@ -469,7 +524,6 @@ export default function Page() {
         </div>
       </section>
 
-      {/* POSISI IKLAN 1 DENGAN ID SLOT 9626464764 */}
       <AdBanner slotId="9626464764" />
 
       <section style={styles.panel}>
@@ -485,7 +539,6 @@ export default function Page() {
           <>
             <video ref={videoRef} src={videoURL} onLoadedMetadata={onLoadedMeta} style={{ display: "none" }} playsInline muted />
 
-            {/* AREA PREVIEW */}
             <div style={styles.previewWrap}>
               {status === "processing" && (
                 <div style={styles.processingOverlay}>
@@ -618,7 +671,6 @@ export default function Page() {
                     ⬇ DOWNLOAD HASIL (.{fileExt})
                   </a>
                 </div>
-                {/* POSISI IKLAN 2 DENGAN ID SLOT 9626464764 */}
                 <AdBanner slotId="9626464764" />
               </>
             )}
@@ -626,7 +678,6 @@ export default function Page() {
         )}
       </section>
 
-      {/* SEKSI BARU UNTUK KONTEN SEO & ADSENSE COMPLIANCE */}
       <section style={styles.seoArticle}>
         <div style={styles.seoContent}>
           <h2 style={styles.seoH2}>Tentang Burikin Aja</h2>
@@ -665,16 +716,16 @@ export default function Page() {
         </div>
       </section>
 
-      {/* FOOTER BARU DENGAN NAVIGASI LEGAL UNTUK ADSENSE */}
+      {/* FOOTER NAVIGASI LEGAL (BISA DI-KLIK SEKARANG) */}
       <footer style={styles.footer}>
         <div style={styles.footerNav}>
-          <a href="#" style={styles.footerLink}>Privacy Policy</a>
+          <a href="#privacy" onClick={(e) => { e.preventDefault(); setActiveModal("privacy"); }} style={styles.footerLink}>Privacy Policy</a>
           <span style={styles.footerDot}>•</span>
-          <a href="#" style={styles.footerLink}>Terms of Service</a>
+          <a href="#tos" onClick={(e) => { e.preventDefault(); setActiveModal("tos"); }} style={styles.footerLink}>Terms of Service</a>
           <span style={styles.footerDot}>•</span>
-          <a href="#" style={styles.footerLink}>Contact Us</a>
+          <a href="#contact" onClick={(e) => { e.preventDefault(); setActiveModal("contact"); }} style={styles.footerLink}>Contact Us</a>
           <span style={styles.footerDot}>•</span>
-          <a href="#" style={styles.footerLink}>About</a>
+          <a href="#about" onClick={(e) => { e.preventDefault(); setActiveModal("about"); }} style={styles.footerLink}>About</a>
         </div>
         <p style={{ marginTop: 16 }}>
           Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br/>
@@ -682,12 +733,22 @@ export default function Page() {
         </p>
         <p style={{ marginTop: 8, fontSize: 10, color: "var(--dim)", opacity: 0.7 }}>© {new Date().getFullYear()} Burikin Aja. All rights reserved.</p>
       </footer>
+
+      {/* MODAL POPUP UNTUK HALAMAN LEGAL */}
+      {activeModal && (
+        <div style={styles.modalOverlay} onClick={() => setActiveModal(null)}>
+          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <button style={styles.closeBtn} onClick={() => setActiveModal(null)}>×</button>
+            {renderModalContent()}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
 const styles = {
-  main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px" },
+  main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px", position: "relative" },
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
   credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
   visitorBadge: { display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--panel)", border: "1px solid var(--line)", padding: "6px 10px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
@@ -740,8 +801,15 @@ const styles = {
 
   footer: { marginTop: 50, color: "var(--dim)", fontSize: 12, textAlign: "center", lineHeight: 1.6, paddingBottom: 20 },
   footerNav: { display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 },
-  footerLink: { color: "var(--text)", textDecoration: "none", fontWeight: "bold" },
+  footerLink: { color: "var(--text)", textDecoration: "none", fontWeight: "bold", cursor: "pointer" },
   footerDot: { color: "var(--line)" },
+
+  // Style untuk Modal Popup
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 999, display: "flex", justifyContent: "center", alignItems: "center", padding: 20, backdropFilter: "blur(4px)" },
+  modalContent: { background: "var(--panel)", border: "1px solid var(--amber)", borderRadius: 8, padding: "30px 24px", maxWidth: 500, width: "100%", maxHeight: "80vh", overflowY: "auto", position: "relative", textAlign: "left" },
+  closeBtn: { position: "absolute", top: 12, right: 16, background: "transparent", border: "none", color: "var(--dim)", fontSize: 28, cursor: "pointer", lineHeight: 1 },
+  modalTitle: { fontSize: 20, color: "var(--amber)", marginBottom: 16, fontFamily: "var(--mono-display)", borderBottom: "1px solid var(--line)", paddingBottom: 10 },
+  modalText: { fontSize: 14, color: "var(--text)", lineHeight: 1.7, marginBottom: 14 }
 };
 
 if (typeof document !== 'undefined') {
