@@ -54,6 +54,8 @@ export default function Page() {
   const pixelCanvasRef = useRef(null); 
   const audioCtxRef = useRef(null);
   const heroCanvasRef = useRef(null);
+  const imageInputRef = useRef(null);
+  const imageCanvasRef = useRef(null);
 
   // States dasar
   const [fileName, setFileName] = useState("");
@@ -79,6 +81,12 @@ export default function Page() {
   const [pixelScale, setPixelScale] = useState(1); 
   const [stretchFactor, setStretchFactor] = useState(1); 
   const [colorFilter, setColorFilter] = useState(0);
+
+  // States untuk Burikin Gambar
+  const [imageURL, setImageURL] = useState(null);
+  const [imageName, setImageName] = useState("");
+  const [imagePixel, setImagePixel] = useState(8);
+  const [imageFilter, setImageFilter] = useState(0);
 
   const updateCanvasSize = useCallback(() => {
     const video = videoRef.current;
@@ -180,6 +188,74 @@ export default function Page() {
     const url = URL.createObjectURL(f);
     setVideoURL(url);
     setReady(false);
+  };
+
+  const onPickImage = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImageName(f.name);
+    const url = URL.createObjectURL(f);
+    setImageURL(url);
+  };
+
+  const renderBurikImage = useCallback(() => {
+    const canvas = imageCanvasRef.current;
+    if (!canvas || !imageURL) return;
+    const img = new window.Image();
+    img.onload = () => {
+      const W = img.naturalWidth;
+      const H = img.naturalHeight;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+
+      if (imagePixel > 1) {
+        const pw = Math.max(1, Math.floor(W / imagePixel));
+        const ph = Math.max(1, Math.floor(H / imagePixel));
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, 0, 0, pw, ph);
+        ctx.drawImage(canvas, 0, 0, pw, ph, 0, 0, W, H);
+      } else {
+        ctx.drawImage(img, 0, 0, W, H);
+      }
+
+      // apply color filter via imageData
+      if (imageFilter > 0) {
+        const imageData = ctx.getImageData(0, 0, W, H);
+        const d = imageData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i], g = d[i+1], b = d[i+2];
+          if (imageFilter === 1) {
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            d[i] = d[i+1] = d[i+2] = gray;
+          } else if (imageFilter === 2) {
+            d[i]   = Math.min(255, r * 0.9 + 60);
+            d[i+1] = Math.min(255, g * 0.75 + 20);
+            d[i+2] = Math.min(255, b * 0.5);
+          } else if (imageFilter === 3) {
+            d[i]   = Math.min(255, r * 1.8 + 50);
+            d[i+1] = Math.min(255, g * 0.5);
+            d[i+2] = Math.min(255, b * 1.8 + 50);
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
+      }
+    };
+    img.src = imageURL;
+  }, [imageURL, imagePixel, imageFilter]);
+
+  useEffect(() => {
+    renderBurikImage();
+  }, [renderBurikImage]);
+
+  const downloadBurikImage = () => {
+    const canvas = imageCanvasRef.current;
+    if (!canvas) return;
+    const link = document.createElement("a");
+    const baseName = imageName ? imageName.replace(/\.[^.]+$/, "") : "gambar";
+    link.download = `${baseName}_burik.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
   };
 
   const drawFrame = useCallback(() => {
@@ -498,6 +574,14 @@ export default function Page() {
 
   return (
     <main style={styles.main}>
+      {/* SIDEBAR BLOG */}
+      <a href="/blog" style={styles.sidebarBlog}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        </svg>
+        <span style={styles.sidebarBlogLabel}>BLOG</span>
+      </a>
       <header style={styles.headerBar}>
         <div style={styles.credits}>
           <span style={styles.visitorBadge}>
@@ -507,7 +591,6 @@ export default function Page() {
             </svg>
             {visitorCount !== null ? visitorCount : "--"} Total Pengunjung
           </span>
-          <a href="/blog" style={{ color: "var(--dim)", textDecoration: "none", fontSize: 12, fontFamily: "var(--mono-display)" }}>Blog</a>
         </div>
         <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={styles.waLink}>
           JOIN SALURAN WA
@@ -528,12 +611,78 @@ export default function Page() {
       <AdBanner slotId="9626464764" />
 
       <section style={styles.panel}>
-        <div style={styles.row}>
-          <button style={styles.uploadBtn} onClick={() => fileInputRef.current?.click()}>
-            {fileName ? "GANTI VIDEO" : "PILIH VIDEO"}
+        {/* KARTU PILIH MEDIA */}
+        <div style={styles.mediaCardRow}>
+          {/* Kartu Video */}
+          <button
+            style={{
+              ...styles.mediaCard,
+              borderColor: videoURL ? "var(--amber)" : "var(--line)",
+              background: videoURL ? "rgba(255,186,0,0.06)" : "var(--panel)",
+            }}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <div style={styles.mediaCardIcon}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                stroke={videoURL ? "var(--amber)" : "var(--dim)"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                <line x1="7" y1="2" x2="7" y2="22" />
+                <line x1="17" y1="2" x2="17" y2="22" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <line x1="2" y1="7" x2="7" y2="7" />
+                <line x1="2" y1="17" x2="7" y2="17" />
+                <line x1="17" y1="17" x2="22" y2="17" />
+                <line x1="17" y1="7" x2="22" y2="7" />
+              </svg>
+            </div>
+            <div style={styles.mediaCardLabel}>
+              {fileName ? (
+                <>
+                  <span style={{ color: "var(--amber)", fontWeight: 700, fontSize: 13 }}>✓ VIDEO DIPILIH</span>
+                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4, wordBreak: "break-all", maxWidth: 120, textAlign: "center" }}>{fileName}</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 13 }}>PILIH VIDEO</span>
+                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4 }}>mp4, webm, dll</span>
+                </>
+              )}
+            </div>
           </button>
           <input ref={fileInputRef} type="file" accept="video/*" onChange={onPickFile} style={{ display: "none" }} />
-          <span style={styles.fileName}>{fileName || "belum ada video"}</span>
+
+          {/* Kartu Gambar */}
+          <button
+            style={{
+              ...styles.mediaCard,
+              borderColor: imageURL ? "var(--green)" : "var(--line)",
+              background: imageURL ? "rgba(0,255,136,0.05)" : "var(--panel)",
+            }}
+            onClick={() => imageInputRef.current?.click()}
+          >
+            <div style={styles.mediaCardIcon}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                stroke={imageURL ? "var(--green)" : "var(--dim)"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <div style={styles.mediaCardLabel}>
+              {imageName ? (
+                <>
+                  <span style={{ color: "var(--green)", fontWeight: 700, fontSize: 13 }}>✓ GAMBAR DIPILIH</span>
+                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4, wordBreak: "break-all", maxWidth: 120, textAlign: "center" }}>{imageName}</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 13 }}>BURIKIN GAMBAR</span>
+                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4 }}>jpg, png, webp, dll</span>
+                </>
+              )}
+            </div>
+          </button>
+          <input ref={imageInputRef} type="file" accept="image/*" onChange={onPickImage} style={{ display: "none" }} />
         </div>
 
         {videoURL && (
@@ -677,6 +826,49 @@ export default function Page() {
             )}
           </>
         )}
+
+        {/* ===== SECTION BURIKIN GAMBAR ===== */}
+        {imageURL && (
+          <div style={styles.imageBurikSection}>
+            <div style={styles.setSectionTitle}>🖼️ BURIKIN GAMBAR</div>
+            <div style={styles.imageBurikGrid}>
+              {/* Preview */}
+              <div style={styles.imageBurikPreview}>
+                <canvas ref={imageCanvasRef} style={styles.imageBurikCanvas} />
+                <div style={styles.recBadge}>● PREVIEW</div>
+              </div>
+            </div>
+            {/* Kontrol pixelasi gambar */}
+            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label style={styles.setLabel}>
+                <span style={styles.setTitle}>Turunkan Resolusi (Piksel)</span>
+                <select style={styles.setSelect} value={imagePixel} onChange={(e) => setImagePixel(Number(e.target.value))}>
+                  <option value={1}>Asli (Jernih)</option>
+                  <option value={4}>Sedikit Burik</option>
+                  <option value={8}>Lumayan Burik</option>
+                  <option value={16}>Burik Parah</option>
+                  <option value={32}>Kotak-Kotak 8bit</option>
+                  <option value={64}>Minecraft Mode</option>
+                </select>
+              </label>
+              <label style={styles.setLabel}>
+                <span style={styles.setTitle}>Filter Warna</span>
+                <select style={styles.setSelect} value={imageFilter} onChange={(e) => setImageFilter(Number(e.target.value))}>
+                  <option value={0}>Normal (Asli)</option>
+                  <option value={1}>Hitam Putih</option>
+                  <option value={2}>Vintage Sepia</option>
+                  <option value={3}>Deep Fried</option>
+                </select>
+              </label>
+            </div>
+            <button
+              style={{ ...styles.processBtn, background: "var(--green)", marginTop: 14 }}
+              onClick={downloadBurikImage}
+            >
+              ⬇ DOWNLOAD GAMBAR BURIK
+            </button>
+          </div>
+        )}
       </section>
 
       <section style={styles.seoArticle}>
@@ -752,6 +944,72 @@ export default function Page() {
 
 const styles = {
   main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px", position: "relative" },
+  
+  // SIDEBAR BLOG
+  sidebarBlog: {
+    position: "fixed",
+    left: 0,
+    top: "50%",
+    transform: "translateY(-50%)",
+    background: "var(--panel)",
+    border: "1px solid var(--line)",
+    borderLeft: "none",
+    borderRadius: "0 6px 6px 0",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 6,
+    padding: "14px 10px",
+    textDecoration: "none",
+    color: "var(--dim)",
+    zIndex: 100,
+    transition: "color 0.15s, borderColor 0.15s",
+  },
+  sidebarBlogLabel: {
+    fontFamily: "var(--mono-display)",
+    fontSize: 10,
+    letterSpacing: "0.12em",
+    writingMode: "vertical-rl",
+    textOrientation: "mixed",
+    transform: "rotate(180deg)",
+  },
+
+  // MEDIA CARDS
+  mediaCardRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 14,
+    marginBottom: 22,
+  },
+  mediaCard: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    padding: "28px 16px",
+    border: "2px dashed var(--line)",
+    borderRadius: 8,
+    background: "var(--panel)",
+    cursor: "pointer",
+    transition: "border-color 0.15s, background 0.15s",
+    minHeight: 140,
+  },
+  mediaCardIcon: { lineHeight: 1 },
+  mediaCardLabel: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4 },
+
+  // IMAGE BURIK SECTION
+  imageBurikSection: {
+    marginTop: 32,
+    padding: 20,
+    border: "1px solid var(--line)",
+    background: "var(--panel)",
+    borderRadius: 8,
+  },
+  imageBurikGrid: { position: "relative", marginTop: 14, border: "1px solid var(--line)", background: "#000", display: "flex", justifyContent: "center", overflow: "hidden", borderRadius: 4 },
+  imageBurikCanvas: { width: "100%", height: "auto", maxHeight: "60vh", objectFit: "contain", display: "block", imageRendering: "pixelated" },
+  imageBurikPreview: { position: "relative", width: "100%" },
+
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
   credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
   visitorBadge: { display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--panel)", border: "1px solid var(--line)", padding: "6px 10px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
