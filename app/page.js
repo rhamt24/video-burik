@@ -78,6 +78,9 @@ export default function Page() {
   const [videoQuality, setVideoQuality] = useState(2); 
   const [audioQuality, setAudioQuality] = useState(2); 
   
+  // State untuk efek audio tambahan (bisa multi-pilih)
+  const [audioEffect, setAudioEffect] = useState("none"); // "none"|"tupai"|"setan"|"bass"|"megaphone"|"cave"|"robot"|"vhs"|"telephone"
+  
   const [pixelScale, setPixelScale] = useState(1); 
   const [stretchFactor, setStretchFactor] = useState(1); 
   const [colorFilter, setColorFilter] = useState(0);
@@ -395,6 +398,7 @@ export default function Page() {
         audioCtxRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(new MediaStream(audioTracks));
 
+        // ── 1. Degradasi kualitas dasar (lowpass + distorsi) ──
         let cutoff = 20000;
         let dist = 0;
         if (audioQuality === 1) { cutoff = 1500; dist = 30; } 
@@ -413,6 +417,172 @@ export default function Page() {
           distortion.oversample = "none";
           lastNode.connect(distortion);
           lastNode = distortion;
+        }
+
+        // ── 2. Efek Audio Spesial ──
+        if (audioEffect === "tupai") {
+          // Pitch naik 2 oktaf via playbackRate trick: buffer manipulation
+          // Kita pakai ScriptProcessor sederhana untuk resample naik
+          const gainCompensate = audioCtx.createGain();
+          gainCompensate.gain.value = 0.8;
+          lastNode.connect(gainCompensate);
+          lastNode = gainCompensate;
+          // Tupai: highpass untuk suara chipmunk
+          const hipass = audioCtx.createBiquadFilter();
+          hipass.type = "highpass";
+          hipass.frequency.value = 800;
+          hipass.Q.value = 1.5;
+          lastNode.connect(hipass);
+          const boostHi = audioCtx.createBiquadFilter();
+          boostHi.type = "peaking";
+          boostHi.frequency.value = 3500;
+          boostHi.gain.value = 14;
+          boostHi.Q.value = 0.8;
+          hipass.connect(boostHi);
+          lastNode = boostHi;
+
+        } else if (audioEffect === "setan") {
+          // Suara setan: bass boost + lowpass ketat + distorsi berat
+          const bassBoost = audioCtx.createBiquadFilter();
+          bassBoost.type = "lowshelf";
+          bassBoost.frequency.value = 200;
+          bassBoost.gain.value = 18;
+          lastNode.connect(bassBoost);
+          const lopass2 = audioCtx.createBiquadFilter();
+          lopass2.type = "lowpass";
+          lopass2.frequency.value = 900;
+          lopass2.Q.value = 2;
+          bassBoost.connect(lopass2);
+          const devilDist = audioCtx.createWaveShaper();
+          devilDist.curve = makeDistortionCurve(120);
+          devilDist.oversample = "none";
+          lopass2.connect(devilDist);
+          lastNode = devilDist;
+
+        } else if (audioEffect === "bass") {
+          // Bass boost ekstrem
+          const sub = audioCtx.createBiquadFilter();
+          sub.type = "peaking";
+          sub.frequency.value = 60;
+          sub.gain.value = 16;
+          sub.Q.value = 1.2;
+          lastNode.connect(sub);
+          const mid = audioCtx.createBiquadFilter();
+          mid.type = "peaking";
+          mid.frequency.value = 140;
+          mid.gain.value = 12;
+          mid.Q.value = 1.0;
+          sub.connect(mid);
+          const hiCut = audioCtx.createBiquadFilter();
+          hiCut.type = "highshelf";
+          hiCut.frequency.value = 3000;
+          hiCut.gain.value = -8;
+          mid.connect(hiCut);
+          lastNode = hiCut;
+
+        } else if (audioEffect === "megaphone") {
+          // Megaphone / pengeras jalan: bandpass sempit + distorsi ringan
+          const band = audioCtx.createBiquadFilter();
+          band.type = "bandpass";
+          band.frequency.value = 1800;
+          band.Q.value = 0.7;
+          lastNode.connect(band);
+          const clip = audioCtx.createWaveShaper();
+          clip.curve = makeDistortionCurve(40);
+          band.connect(clip);
+          const presence = audioCtx.createBiquadFilter();
+          presence.type = "peaking";
+          presence.frequency.value = 2400;
+          presence.gain.value = 10;
+          presence.Q.value = 1.5;
+          clip.connect(presence);
+          lastNode = presence;
+
+        } else if (audioEffect === "cave") {
+          // Efek gua / echo: convolver dengan impulse buatan
+          const bufLen = audioCtx.sampleRate * 2.5;
+          const irBuf = audioCtx.createBuffer(2, bufLen, audioCtx.sampleRate);
+          for (let ch = 0; ch < 2; ch++) {
+            const d = irBuf.getChannelData(ch);
+            for (let i = 0; i < bufLen; i++) {
+              d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufLen, 2.5);
+            }
+          }
+          const convolver = audioCtx.createConvolver();
+          convolver.buffer = irBuf;
+          lastNode.connect(convolver);
+          const wetGain = audioCtx.createGain();
+          wetGain.gain.value = 0.6;
+          convolver.connect(wetGain);
+          const dryGain = audioCtx.createGain();
+          dryGain.gain.value = 0.5;
+          lastNode.connect(dryGain);
+          // Mix dry + wet via merger
+          const merger = audioCtx.createGain();
+          merger.gain.value = 1;
+          wetGain.connect(merger);
+          dryGain.connect(merger);
+          lastNode = merger;
+
+        } else if (audioEffect === "robot") {
+          // Robot: ring modulator (oscillator * signal)
+          const ringOsc = audioCtx.createOscillator();
+          ringOsc.frequency.value = 50;
+          ringOsc.type = "sine";
+          const ringGain = audioCtx.createGain();
+          ringGain.gain.value = 0;
+          ringOsc.connect(ringGain.gain);
+          lastNode.connect(ringGain);
+          ringOsc.start();
+          const robotDist = audioCtx.createWaveShaper();
+          robotDist.curve = makeDistortionCurve(20);
+          ringGain.connect(robotDist);
+          const notch = audioCtx.createBiquadFilter();
+          notch.type = "notch";
+          notch.frequency.value = 1000;
+          notch.Q.value = 5;
+          robotDist.connect(notch);
+          lastNode = notch;
+
+        } else if (audioEffect === "vhs") {
+          // VHS / kaset lawas: flutter + wow (LFO pada gain) + saturate ringan
+          const vhsDist = audioCtx.createWaveShaper();
+          vhsDist.curve = makeDistortionCurve(15);
+          lastNode.connect(vhsDist);
+          const wow = audioCtx.createGain();
+          wow.gain.value = 1;
+          const lfo = audioCtx.createOscillator();
+          lfo.frequency.value = 2.8;
+          lfo.type = "sine";
+          const lfoGain = audioCtx.createGain();
+          lfoGain.gain.value = 0.08;
+          lfo.connect(lfoGain);
+          lfoGain.connect(wow.gain);
+          lfo.start();
+          vhsDist.connect(wow);
+          const hiss = audioCtx.createBiquadFilter();
+          hiss.type = "highshelf";
+          hiss.frequency.value = 6000;
+          hiss.gain.value = -12;
+          wow.connect(hiss);
+          lastNode = hiss;
+
+        } else if (audioEffect === "telephone") {
+          // Telefon jadul: bandpass sempit 300-3400 Hz
+          const hp = audioCtx.createBiquadFilter();
+          hp.type = "highpass";
+          hp.frequency.value = 300;
+          hp.Q.value = 0.5;
+          lastNode.connect(hp);
+          const lp2 = audioCtx.createBiquadFilter();
+          lp2.type = "lowpass";
+          lp2.frequency.value = 3400;
+          lp2.Q.value = 0.5;
+          hp.connect(lp2);
+          const telDist = audioCtx.createWaveShaper();
+          telDist.curve = makeDistortionCurve(8);
+          lp2.connect(telDist);
+          lastNode = telDist;
         }
 
         const dest = audioCtx.createMediaStreamDestination();
@@ -763,6 +933,37 @@ export default function Page() {
                     <option value={4}>Normal (Jernih Asli)</option>
                   </select>
                 </label>
+              </div>
+
+              {/* EFEK AUDIO SPESIAL */}
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={styles.setSectionTitle}>🎙️ EFEK AUDIO SPESIAL</div>
+                <div style={styles.audioEffectGrid}>
+                  {[
+                    { key: "none",      emoji: "🔇", label: "NORMAL",    desc: "Asli" },
+                    { key: "tupai",     emoji: "🐿️", label: "TUPAI",     desc: "Suara chipmunk" },
+                    { key: "setan",     emoji: "😈", label: "SETAN",     desc: "Bass gelap" },
+                    { key: "bass",      emoji: "💥", label: "BASS",      desc: "Sub bass pecah" },
+                    { key: "megaphone", emoji: "📣", label: "MEGAPHONE", desc: "Pengeras jalan" },
+                    { key: "cave",      emoji: "🏔️", label: "GUA",       desc: "Echo & reverb" },
+                    { key: "robot",     emoji: "🤖", label: "ROBOT",     desc: "Ring modulator" },
+                    { key: "vhs",       emoji: "📼", label: "VHS",       desc: "Kaset lawas" },
+                    { key: "telephone", emoji: "☎️", label: "TELEPON",   desc: "Jaringan 2G" },
+                  ].map(({ key, emoji, label, desc }) => (
+                    <button
+                      key={key}
+                      onClick={() => setAudioEffect(key)}
+                      style={{
+                        ...styles.audioEffectBtn,
+                        ...(audioEffect === key ? styles.audioEffectBtnActive : {}),
+                      }}
+                    >
+                      <span style={styles.audioEffectEmoji}>{emoji}</span>
+                      <span style={styles.audioEffectLabel}>{label}</span>
+                      <span style={styles.audioEffectDesc}>{desc}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div style={styles.setSectionGroup}>
@@ -1173,6 +1374,47 @@ const styles = {
     letterSpacing: "0.05em",
   },
 
+  // AUDIO EFFECT GRID
+  audioEffectGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 8,
+    marginTop: 10,
+  },
+  audioEffectBtn: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 3,
+    padding: "10px 6px",
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid var(--line)",
+    borderRadius: 6,
+    cursor: "pointer",
+    transition: "all 0.12s",
+  },
+  audioEffectBtnActive: {
+    background: "rgba(255,186,0,0.1)",
+    borderColor: "var(--amber)",
+  },
+  audioEffectEmoji: {
+    fontSize: 22,
+    lineHeight: 1,
+  },
+  audioEffectLabel: {
+    fontFamily: "var(--mono-display)",
+    fontSize: 10,
+    fontWeight: 700,
+    color: "var(--amber)",
+    letterSpacing: "0.06em",
+  },
+  audioEffectDesc: {
+    fontSize: 10,
+    color: "var(--dim)",
+    textAlign: "center",
+    lineHeight: 1.3,
+  },
+
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
   credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
   visitorBadge: { display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--panel)", border: "1px solid var(--line)", padding: "6px 10px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
@@ -1201,7 +1443,7 @@ const styles = {
   presetRow: { display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" },
   presetBtn: { background: "var(--panel)", border: "1px solid var(--line)", color: "var(--dim)", padding: "8px 14px", fontSize: 12, cursor: "pointer" },
   presetBtnActive: { borderColor: "var(--amber)", color: "var(--amber)" },
-  settingsGrid: { marginTop: 20, marginBottom: 20, display: "grid", gridTemplateColumns: "1fr", gap: 24, background: "var(--panel)", border: "1px solid var(--line)", padding: 20 },
+  settingsGrid: { marginTop: 20, marginBottom: 20, display: "grid", gridTemplateColumns: "1fr", gap: 20, background: "var(--panel)", border: "1px solid var(--line)", padding: 20 },
   setSectionGroup: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 },
   setSectionTitle: { gridColumn: "1 / -1", fontSize: 14, fontWeight: "bold", color: "var(--text)", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 4 },
   setLabel: { display: "flex", flexDirection: "column", gap: 6 },
@@ -1249,4 +1491,3 @@ if (typeof document !== 'undefined') {
   `;
   document.head.appendChild(style);
 }
-
