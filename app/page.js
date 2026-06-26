@@ -507,6 +507,7 @@ export default function Page() {
             </svg>
             {visitorCount !== null ? visitorCount : "--"} Total Pengunjung
           </span>
+          <a href="/blog" style={{ color: "var(--dim)", textDecoration: "none", fontSize: 12, fontFamily: "var(--mono-display)" }}>Blog</a>
         </div>
         <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={styles.waLink}>
           JOIN SALURAN WA
@@ -719,13 +720,15 @@ export default function Page() {
       {/* FOOTER NAVIGASI LEGAL (BISA DI-KLIK SEKARANG) */}
       <footer style={styles.footer}>
         <div style={styles.footerNav}>
-          <a href="#privacy" onClick={(e) => { e.preventDefault(); setActiveModal("privacy"); }} style={styles.footerLink}>Privacy Policy</a>
+          <a href="/privacy" style={styles.footerLink}>Privacy Policy</a>
           <span style={styles.footerDot}>•</span>
-          <a href="#tos" onClick={(e) => { e.preventDefault(); setActiveModal("tos"); }} style={styles.footerLink}>Terms of Service</a>
+          <a href="/tos" style={styles.footerLink}>Terms of Service</a>
           <span style={styles.footerDot}>•</span>
-          <a href="#contact" onClick={(e) => { e.preventDefault(); setActiveModal("contact"); }} style={styles.footerLink}>Contact Us</a>
+          <a href="/contact" style={styles.footerLink}>Contact Us</a>
           <span style={styles.footerDot}>•</span>
-          <a href="#about" onClick={(e) => { e.preventDefault(); setActiveModal("about"); }} style={styles.footerLink}>About</a>
+          <a href="/about" style={styles.footerLink}>About</a>
+          <span style={styles.footerDot}>•</span>
+          <a href="/blog" style={styles.footerLink}>Blog</a>
         </div>
         <p style={{ marginTop: 16 }}>
           Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br/>
