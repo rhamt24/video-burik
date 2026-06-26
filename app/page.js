@@ -830,43 +830,92 @@ export default function Page() {
         {/* ===== SECTION BURIKIN GAMBAR ===== */}
         {imageURL && (
           <div style={styles.imageBurikSection}>
-            <div style={styles.setSectionTitle}>🖼️ BURIKIN GAMBAR</div>
-            <div style={styles.imageBurikGrid}>
-              {/* Preview */}
-              <div style={styles.imageBurikPreview}>
+            {/* Header */}
+            <div style={styles.imageBurikHeader}>
+              <span style={styles.imageBurikTitle}>🖼️ BURIKIN GAMBAR</span>
+              <span style={styles.imageBurikBadge}>● LIVE PREVIEW</span>
+            </div>
+
+            {/* Layout: Preview + Kontrol side by side */}
+            <div style={styles.imageBurikBody}>
+              {/* Kiri: Preview Canvas */}
+              <div style={styles.imageBurikPreviewWrap}>
                 <canvas ref={imageCanvasRef} style={styles.imageBurikCanvas} />
-                <div style={styles.recBadge}>● PREVIEW</div>
+              </div>
+
+              {/* Kanan: Kontrol */}
+              <div style={styles.imageBurikControls}>
+
+                {/* Slider Level Burik */}
+                <div style={styles.sliderGroup}>
+                  <div style={styles.sliderLabelRow}>
+                    <span style={styles.setTitle}>TINGKAT BURIK</span>
+                    <span style={styles.sliderValue}>{
+                      imagePixel === 1 ? "JERNIH" :
+                      imagePixel <= 4 ? "DIKIT" :
+                      imagePixel <= 8 ? "LUMAYAN" :
+                      imagePixel <= 16 ? "PARAH" :
+                      imagePixel <= 32 ? "8-BIT" : "MINECRAFT"
+                    }</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={5}
+                    step={1}
+                    value={[1,4,8,16,32,64].indexOf(imagePixel) === -1 ? 0 : [1,4,8,16,32,64].indexOf(imagePixel)}
+                    onChange={(e) => {
+                      const levels = [1,4,8,16,32,64];
+                      setImagePixel(levels[Number(e.target.value)]);
+                    }}
+                    style={styles.burikSlider}
+                  />
+                  <div style={styles.sliderTicks}>
+                    <span>😇</span>
+                    <span>😬</span>
+                    <span>🤢</span>
+                    <span>💀</span>
+                    <span>👾</span>
+                    <span>🧱</span>
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div style={{ borderTop: "1px dashed var(--line)", margin: "14px 0" }} />
+
+                {/* Filter Warna */}
+                <div style={styles.setLabel}>
+                  <span style={styles.setTitle}>FILTER WARNA</span>
+                  <div style={styles.filterBtnRow}>
+                    {[
+                      { val: 0, label: "NORMAL" },
+                      { val: 1, label: "B&W" },
+                      { val: 2, label: "SEPIA" },
+                      { val: 3, label: "FRIED" },
+                    ].map(({ val, label }) => (
+                      <button
+                        key={val}
+                        onClick={() => setImageFilter(val)}
+                        style={{
+                          ...styles.filterBtn,
+                          ...(imageFilter === val ? styles.filterBtnActive : {}),
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Download Button */}
+                <button
+                  style={styles.imageDlBtn}
+                  onClick={downloadBurikImage}
+                >
+                  ⬇ DOWNLOAD
+                </button>
               </div>
             </div>
-            {/* Kontrol pixelasi gambar */}
-            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <label style={styles.setLabel}>
-                <span style={styles.setTitle}>Turunkan Resolusi (Piksel)</span>
-                <select style={styles.setSelect} value={imagePixel} onChange={(e) => setImagePixel(Number(e.target.value))}>
-                  <option value={1}>Asli (Jernih)</option>
-                  <option value={4}>Sedikit Burik</option>
-                  <option value={8}>Lumayan Burik</option>
-                  <option value={16}>Burik Parah</option>
-                  <option value={32}>Kotak-Kotak 8bit</option>
-                  <option value={64}>Minecraft Mode</option>
-                </select>
-              </label>
-              <label style={styles.setLabel}>
-                <span style={styles.setTitle}>Filter Warna</span>
-                <select style={styles.setSelect} value={imageFilter} onChange={(e) => setImageFilter(Number(e.target.value))}>
-                  <option value={0}>Normal (Asli)</option>
-                  <option value={1}>Hitam Putih</option>
-                  <option value={2}>Vintage Sepia</option>
-                  <option value={3}>Deep Fried</option>
-                </select>
-              </label>
-            </div>
-            <button
-              style={{ ...styles.processBtn, background: "var(--green)", marginTop: 14 }}
-              onClick={downloadBurikImage}
-            >
-              ⬇ DOWNLOAD GAMBAR BURIK
-            </button>
           </div>
         )}
       </section>
@@ -1001,14 +1050,128 @@ const styles = {
   // IMAGE BURIK SECTION
   imageBurikSection: {
     marginTop: 32,
-    padding: 20,
     border: "1px solid var(--line)",
     background: "var(--panel)",
     borderRadius: 8,
+    overflow: "hidden",
   },
-  imageBurikGrid: { position: "relative", marginTop: 14, border: "1px solid var(--line)", background: "#000", display: "flex", justifyContent: "center", overflow: "hidden", borderRadius: 4 },
-  imageBurikCanvas: { width: "100%", height: "auto", maxHeight: "60vh", objectFit: "contain", display: "block", imageRendering: "pixelated" },
-  imageBurikPreview: { position: "relative", width: "100%" },
+  imageBurikHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 16px",
+    borderBottom: "1px solid var(--line)",
+    background: "rgba(255,255,255,0.02)",
+  },
+  imageBurikTitle: {
+    fontFamily: "var(--mono-display)",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "var(--text)",
+  },
+  imageBurikBadge: {
+    fontFamily: "var(--mono-display)",
+    fontSize: 11,
+    color: "var(--danger)",
+    background: "rgba(0,0,0,0.4)",
+    padding: "2px 8px",
+    borderRadius: 4,
+  },
+  imageBurikBody: {
+    display: "flex",
+    flexDirection: "row",
+    gap: 0,
+  },
+  imageBurikPreviewWrap: {
+    flex: "0 0 55%",
+    background: "#000",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderRight: "1px solid var(--line)",
+    minHeight: 220,
+  },
+  imageBurikCanvas: {
+    width: "100%",
+    height: "auto",
+    maxHeight: 320,
+    objectFit: "contain",
+    display: "block",
+    imageRendering: "pixelated",
+  },
+  imageBurikControls: {
+    flex: 1,
+    padding: "16px 14px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+  },
+  // Slider styles
+  sliderGroup: { display: "flex", flexDirection: "column", gap: 8 },
+  sliderLabelRow: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  sliderValue: {
+    fontFamily: "var(--mono-display)",
+    fontSize: 10,
+    color: "var(--amber)",
+    background: "rgba(255,186,0,0.1)",
+    border: "1px solid var(--amber)",
+    padding: "2px 6px",
+    borderRadius: 3,
+    letterSpacing: "0.05em",
+  },
+  burikSlider: {
+    width: "100%",
+    accentColor: "var(--amber)",
+    cursor: "pointer",
+    height: 4,
+  },
+  sliderTicks: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: 14,
+    paddingTop: 2,
+  },
+  // Filter buttons
+  filterBtnRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 6,
+    marginTop: 8,
+  },
+  filterBtn: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid var(--line)",
+    color: "var(--dim)",
+    padding: "8px 4px",
+    fontSize: 11,
+    fontFamily: "var(--mono-display)",
+    fontWeight: 700,
+    letterSpacing: "0.05em",
+    cursor: "pointer",
+    borderRadius: 4,
+    transition: "all 0.1s",
+  },
+  filterBtnActive: {
+    background: "rgba(0,255,136,0.1)",
+    borderColor: "var(--green)",
+    color: "var(--green)",
+  },
+  imageDlBtn: {
+    marginTop: "auto",
+    paddingTop: 14,
+    width: "100%",
+    background: "var(--green)",
+    color: "#000",
+    border: "none",
+    padding: "12px 8px",
+    fontWeight: 800,
+    fontSize: 13,
+    fontFamily: "var(--mono-display)",
+    cursor: "pointer",
+    borderRadius: 4,
+    letterSpacing: "0.05em",
+  },
 
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
   credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
@@ -1075,6 +1238,15 @@ const styles = {
 
 if (typeof document !== 'undefined') {
   const style = document.createElement('style');
-  style.innerHTML = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
+  style.innerHTML = `
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; }
+    input[type=range]::-webkit-slider-runnable-track { background: var(--line); height: 4px; border-radius: 2px; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); margin-top: -7px; border: 2px solid #000; cursor: pointer; }
+    input[type=range]::-moz-range-track { background: var(--line); height: 4px; border-radius: 2px; }
+    input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--amber); border: 2px solid #000; cursor: pointer; }
+    a[href="/blog"]:hover { color: var(--amber) !important; border-color: var(--amber) !important; }
+  `;
   document.head.appendChild(style);
 }
+
