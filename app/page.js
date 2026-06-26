@@ -38,8 +38,8 @@ function AdBanner({ slotId }) {
       <ins
         className="adsbygoogle"
         style={{ display: "block" }}
-        data-ad-client="ca-pub-6307870813026612" 
-        data-ad-slot={slotId} 
+        data-ad-client="ca-pub-6307870813026612"
+        data-ad-slot={slotId}
         data-ad-format="auto"
         data-full-width-responsive="true"
       ></ins>
@@ -51,11 +51,18 @@ export default function Page() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const pixelCanvasRef = useRef(null); 
+  const pixelCanvasRef = useRef(null);
   const audioCtxRef = useRef(null);
   const heroCanvasRef = useRef(null);
   const imageInputRef = useRef(null);
   const imageCanvasRef = useRef(null);
+
+  // Refs untuk proses recording — tidak perlu re-render
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const rafRef = useRef(null);
+  const drawIntervalRef = useRef(null);
+  const isCancelledRef = useRef(false);
 
   // States dasar
   const [fileName, setFileName] = useState("");
@@ -68,21 +75,18 @@ export default function Page() {
   const [fileExt, setFileExt] = useState("mp4");
   const [visitorCount, setVisitorCount] = useState(null);
   const [presetKey, setPresetKey] = useState("sedang");
-  
+
   // State untuk Popup Legal
-  const [activeModal, setActiveModal] = useState(null); 
+  const [activeModal, setActiveModal] = useState(null);
 
   // States Parameter Lanjutan
-  const [resHeight, setResHeight] = useState(240); 
-  const [fpsTarget, setFpsTarget] = useState(15); 
-  const [videoQuality, setVideoQuality] = useState(2); 
-  const [audioQuality, setAudioQuality] = useState(2); 
-  
-  // State untuk efek audio tambahan (bisa multi-pilih)
-  const [audioEffect, setAudioEffect] = useState("none"); // "none"|"tupai"|"setan"|"bass"|"megaphone"|"cave"|"robot"|"vhs"|"telephone"
-  
-  const [pixelScale, setPixelScale] = useState(1); 
-  const [stretchFactor, setStretchFactor] = useState(1); 
+  const [resHeight, setResHeight] = useState(240);
+  const [fpsTarget, setFpsTarget] = useState(15);
+  const [videoQuality, setVideoQuality] = useState(2);
+  const [audioQuality, setAudioQuality] = useState(2);
+  const [audioEffect, setAudioEffect] = useState("none");
+  const [pixelScale, setPixelScale] = useState(1);
+  const [stretchFactor, setStretchFactor] = useState(1);
   const [colorFilter, setColorFilter] = useState(0);
 
   // States untuk Burikin Gambar
@@ -91,28 +95,30 @@ export default function Page() {
   const [imagePixel, setImagePixel] = useState(8);
   const [imageFilter, setImageFilter] = useState(0);
 
-  const updateCanvasSize = useCallback(() => {
-    const video = videoRef.current;
+  // Simpan setting saat ini ke ref agar bisa dibaca di dalam handler async tanpa stale closure
+  const settingRef = useRef({});
+  useEffect(() => {
+    settingRef.current = { resHeight, fpsTarget, videoQuality, audioQuality, audioEffect, pixelScale, stretchFactor, colorFilter };
+  }, [resHeight, fpsTarget, videoQuality, audioQuality, audioEffect, pixelScale, stretchFactor, colorFilter]);
+
+  const updateCanvasSize = useCallback((vw, vh) => {
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    if (!canvas) return;
 
-    let vh = video.videoHeight || 360;
-    let vw = video.videoWidth || 640;
+    const { resHeight: rh, stretchFactor: sf } = settingRef.current;
 
-    let targetH = resHeight === 0 ? vh : resHeight;
-    if (targetH > vh) targetH = vh;
-
+    let targetH = rh === 0 ? vh : Math.min(rh, vh);
     const baseRatio = vw / vh;
-    let targetW = targetH * baseRatio * stretchFactor;
+    let targetW = targetH * baseRatio * sf;
 
     if (targetW > 1920) {
       targetW = 1920;
-      targetH = targetW / (baseRatio * stretchFactor);
+      targetH = targetW / (baseRatio * sf);
     }
 
-    canvas.width = Math.round(targetW) & ~1;
-    canvas.height = Math.round(targetH) & ~1;
-  }, [resHeight, stretchFactor]);
+    canvas.width = Math.round(targetW) & ~1 || 2;
+    canvas.height = Math.round(targetH) & ~1 || 2;
+  }, []);
 
   const applyPreset = (key) => {
     setPresetKey(key);
@@ -131,31 +137,27 @@ export default function Page() {
     if (PRESETS[presetKey]) {
       const p = PRESETS[presetKey];
       if (
-        resHeight !== p.res ||
-        fpsTarget !== p.fps ||
-        videoQuality !== p.vQuality ||
-        audioQuality !== p.aQuality ||
-        pixelScale !== p.pixel ||
-        stretchFactor !== p.stretch ||
-        colorFilter !== p.color
+        resHeight !== p.res || fpsTarget !== p.fps || videoQuality !== p.vQuality ||
+        audioQuality !== p.aQuality || pixelScale !== p.pixel ||
+        stretchFactor !== p.stretch || colorFilter !== p.color
       ) {
         setPresetKey("custom");
       }
     }
   }, [resHeight, fpsTarget, videoQuality, audioQuality, pixelScale, stretchFactor, colorFilter, presetKey]);
 
+  // Update canvas size saat setting berubah (hanya di luar proses)
   useEffect(() => {
-    if (status !== "processing") {
-      updateCanvasSize();
-    }
+    if (status === "processing") return;
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    updateCanvasSize(video.videoWidth, video.videoHeight);
   }, [resHeight, stretchFactor, updateCanvasSize, status]);
 
   useEffect(() => {
     fetch("https://api.counterapi.dev/v1/burikin-zals-app/visitor/up")
       .then((res) => res.json())
-      .then((data) => {
-        if (data && data.count) setVisitorCount(data.count);
-      })
+      .then((data) => { if (data && data.count) setVisitorCount(data.count); })
       .catch((err) => console.error("Gagal load visitor counter", err));
   }, []);
 
@@ -169,10 +171,8 @@ export default function Page() {
       const imgData = ctx.createImageData(160, 90);
       for (let i = 0; i < imgData.data.length; i += 4) {
         const v = Math.random() * 255;
-        imgData.data[i] = v;
-        imgData.data[i + 1] = v;
-        imgData.data[i + 2] = v;
-        imgData.data[i + 3] = 35;
+        imgData.data[i] = v; imgData.data[i + 1] = v;
+        imgData.data[i + 2] = v; imgData.data[i + 3] = 35;
       }
       ctx.putImageData(imgData, 0, 0);
       raf = requestAnimationFrame(draw);
@@ -184,6 +184,8 @@ export default function Page() {
   const onPickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
+    // Batalkan proses yang sedang berjalan jika ada
+    isCancelledRef.current = true;
     setOutputURL(null);
     setStatus("idle");
     setErrorMsg(null);
@@ -222,24 +224,14 @@ export default function Page() {
         ctx.drawImage(img, 0, 0, W, H);
       }
 
-      // apply color filter via imageData
       if (imageFilter > 0) {
         const imageData = ctx.getImageData(0, 0, W, H);
         const d = imageData.data;
         for (let i = 0; i < d.length; i += 4) {
-          const r = d[i], g = d[i+1], b = d[i+2];
-          if (imageFilter === 1) {
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            d[i] = d[i+1] = d[i+2] = gray;
-          } else if (imageFilter === 2) {
-            d[i]   = Math.min(255, r * 0.9 + 60);
-            d[i+1] = Math.min(255, g * 0.75 + 20);
-            d[i+2] = Math.min(255, b * 0.5);
-          } else if (imageFilter === 3) {
-            d[i]   = Math.min(255, r * 1.8 + 50);
-            d[i+1] = Math.min(255, g * 0.5);
-            d[i+2] = Math.min(255, b * 1.8 + 50);
-          }
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          if (imageFilter === 1) { const gray = 0.299 * r + 0.587 * g + 0.114 * b; d[i] = d[i + 1] = d[i + 2] = gray; }
+          else if (imageFilter === 2) { d[i] = Math.min(255, r * 0.9 + 60); d[i + 1] = Math.min(255, g * 0.75 + 20); d[i + 2] = Math.min(255, b * 0.5); }
+          else if (imageFilter === 3) { d[i] = Math.min(255, r * 1.8 + 50); d[i + 1] = Math.min(255, g * 0.5); d[i + 2] = Math.min(255, b * 1.8 + 50); }
         }
         ctx.putImageData(imageData, 0, 0);
       }
@@ -247,9 +239,7 @@ export default function Page() {
     img.src = imageURL;
   }, [imageURL, imagePixel, imageFilter]);
 
-  useEffect(() => {
-    renderBurikImage();
-  }, [renderBurikImage]);
+  useEffect(() => { renderBurikImage(); }, [renderBurikImage]);
 
   const downloadBurikImage = () => {
     const canvas = imageCanvasRef.current;
@@ -261,34 +251,31 @@ export default function Page() {
     link.click();
   };
 
-  const drawFrame = useCallback(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const pCanvas = pixelCanvasRef.current;
+  // ─── DRAW FRAME (dipakai preview & recording) ────────────────────────────
+  const drawFrameToCanvas = useCallback((video, canvas, pCanvas, settings) => {
     if (!video || !canvas || !pCanvas) return;
-    
+    if (video.readyState < 2) return; // HAVE_CURRENT_DATA
+
     const ctx = canvas.getContext("2d");
     const pCtx = pCanvas.getContext("2d");
-    
-    const contrast = videoQuality === 1 ? 1.15 : videoQuality === 2 ? 1.05 : 1;
-    const saturate = videoQuality === 1 ? 1.2 : videoQuality === 2 ? 1.1 : 1;
+
+    const { videoQuality: vq, pixelScale: ps, colorFilter: cf } = settings;
+    const contrast = vq === 1 ? 1.15 : vq === 2 ? 1.05 : 1;
+    const saturate = vq === 1 ? 1.2 : vq === 2 ? 1.1 : 1;
 
     let filterStr = `contrast(${contrast}) saturate(${saturate})`;
-    if (colorFilter === 1) filterStr += ' grayscale(100%) contrast(1.2)'; 
-    else if (colorFilter === 2) filterStr += ' sepia(80%) hue-rotate(-10deg) saturate(1.5)'; 
-    else if (colorFilter === 3) filterStr += ' saturate(3) contrast(1.5) hue-rotate(20deg)'; 
+    if (cf === 1) filterStr += ' grayscale(100%) contrast(1.2)';
+    else if (cf === 2) filterStr += ' sepia(80%) hue-rotate(-10deg) saturate(1.5)';
+    else if (cf === 3) filterStr += ' saturate(3) contrast(1.5) hue-rotate(20deg)';
 
-    if (pixelScale > 1) {
-      const pw = Math.max(2, Math.floor(canvas.width / pixelScale));
-      const ph = Math.max(2, Math.floor(canvas.height / pixelScale));
-      
+    if (ps > 1) {
+      const pw = Math.max(2, Math.floor(canvas.width / ps));
+      const ph = Math.max(2, Math.floor(canvas.height / ps));
       if (pCanvas.width !== pw || pCanvas.height !== ph) {
-        pCanvas.width = pw;
-        pCanvas.height = ph;
+        pCanvas.width = pw; pCanvas.height = ph;
       }
-
+      pCtx.imageSmoothingEnabled = false;
       pCtx.drawImage(video, 0, 0, pw, ph);
-
       ctx.imageSmoothingEnabled = false;
       ctx.filter = filterStr;
       ctx.drawImage(pCanvas, 0, 0, pw, ph, 0, 0, canvas.width, canvas.height);
@@ -297,118 +284,115 @@ export default function Page() {
       ctx.filter = filterStr;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     }
-  }, [videoQuality, pixelScale, colorFilter]);
+    ctx.filter = "none";
+  }, []);
 
   const onLoadedMeta = () => {
-    updateCanvasSize();
+    const video = videoRef.current;
+    if (!video) return;
+    updateCanvasSize(video.videoWidth, video.videoHeight);
     setReady(true);
     setStatus("previewing");
-    
-    if (videoRef.current) {
-      videoRef.current.loop = true;
-      videoRef.current.muted = true;
-      videoRef.current.play().catch(e => console.log("Auto-play preview tertahan browser", e));
-    }
+    video.loop = true;
+    video.muted = true;
+    video.play().catch((e) => console.log("Auto-play preview tertahan browser", e));
   };
 
+  // Preview loop — hanya saat previewing, bukan saat processing
   useEffect(() => {
-    if (status !== "previewing" && status !== "processing") return;
-    let raf;
+    if (status !== "previewing") return;
     let lastDraw = 0;
-    const loop = (timestamp) => {
-      raf = requestAnimationFrame(loop);
-      const interval = 1000 / fpsTarget;
-      if (timestamp - lastDraw >= interval) {
-        drawFrame();
-        lastDraw = timestamp;
+    const loop = (ts) => {
+      rafRef.current = requestAnimationFrame(loop);
+      const interval = 1000 / (settingRef.current.fpsTarget || 15);
+      if (ts - lastDraw >= interval) {
+        drawFrameToCanvas(videoRef.current, canvasRef.current, pixelCanvasRef.current, settingRef.current);
+        lastDraw = ts;
       }
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [status, drawFrame, fpsTarget]);
+    rafRef.current = requestAnimationFrame(loop);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [status, drawFrameToCanvas]);
 
-  const waitForVideoToFinish = (video) => {
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        clearTimeout(watchdogId);
-        clearInterval(stallId);
-        video.removeEventListener("ended", finish);
-        resolve();
-      };
-      video.addEventListener("ended", finish);
-      
-      const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : null;
-      const watchdogId = setTimeout(finish, dur ? dur * 1000 + 10000 : 5 * 60 * 1000);
-      
-      let lastTime = video.currentTime;
-      let stuckTicks = 0;
-      const stallId = setInterval(() => {
-        if (video.ended || video.paused) return;
-        if (Math.abs(video.currentTime - lastTime) < 0.01) stuckTicks++;
-        else { stuckTicks = 0; lastTime = video.currentTime; }
-        
-        if (stuckTicks >= 15) finish(); 
-      }, 1000);
-    });
-  };
-
+  // ─── MAIN PROCESS ────────────────────────────────────────────────────────
   const handleProcess = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    const pCanvas = pixelCanvasRef.current;
+    if (!video || !canvas || !pCanvas) return;
 
-    updateCanvasSize();
+    // Hentikan preview RAF
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
 
+    // Freeze setting saat proses dimulai
+    const settings = { ...settingRef.current };
+
+    isCancelledRef.current = false;
     setStatus("processing");
     setProgress(0);
     setOutputURL(null);
     setErrorMsg(null);
+    chunksRef.current = [];
 
     let recorder = null;
+    let audioCtx = null;
+    let drawTimer = null;
 
     try {
+      // ── 1. Reset video ke awal ──────────────────────────────────────────
       video.pause();
-      video.loop = false; 
-      
-      await new Promise((res) => {
-        let resolved = false;
-        const finish = () => {
-          if (resolved) return;
-          resolved = true;
-          video.removeEventListener("seeked", finish);
-          res();
-        };
-        video.addEventListener("seeked", finish);
-        setTimeout(finish, 500); 
+      video.loop = false;
+      video.muted = true; // Harus muted agar captureStream tidak konflik AudioContext
+
+      await new Promise((resolve) => {
+        const onSeeked = () => { video.removeEventListener("seeked", onSeeked); resolve(); };
+        video.addEventListener("seeked", onSeeked);
         video.currentTime = 0;
+        // Fallback timeout untuk seek
+        setTimeout(resolve, 1000);
       });
 
-      drawFrame(); 
+      // ── 2. Update canvas size berdasarkan video asli ────────────────────
+      updateCanvasSize(video.videoWidth, video.videoHeight);
 
-      const canvasStream = canvas.captureStream(30); 
-      const audioStream = video.captureStream();
-      let audioTracks = audioStream.getAudioTracks();
+      // Draw frame pertama sebelum recorder dimulai
+      drawFrameToCanvas(video, canvas, pCanvas, settings);
 
-      if (audioTracks.length > 0) {
+      // ── 3. Buat stream dari canvas ──────────────────────────────────────
+      // Gunakan fpsTarget sebagai frame rate canvas stream
+      const canvasStream = canvas.captureStream(settings.fpsTarget);
+
+      // ── 4. Setup audio via AudioContext ─────────────────────────────────
+      // Sumber audio dari element video, BUKAN dari captureStream audio track
+      // karena captureStream audio sering lost saat video di-seek / play ulang
+      let finalAudioTracks = [];
+
+      // Cek apakah video punya audio dengan mencoba captureStream
+      const testStream = video.captureStream ? video.captureStream() : null;
+      const hasAudio = testStream && testStream.getAudioTracks().length > 0;
+
+      if (hasAudio) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioCtx({ sampleRate: 44100 });
+        audioCtx = new AudioCtx({ sampleRate: 44100 });
         audioCtxRef.current = audioCtx;
-        const source = audioCtx.createMediaStreamSource(new MediaStream(audioTracks));
 
-        // ── 1. Degradasi kualitas dasar (lowpass + distorsi) ──
-        let cutoff = 20000;
-        let dist = 0;
-        if (audioQuality === 1) { cutoff = 1500; dist = 30; } 
-        else if (audioQuality === 2) { cutoff = 3000; dist = 5; } 
-        else if (audioQuality === 3) { cutoff = 8000; dist = 0; } 
+        // Gunakan MediaElementSourceNode — lebih stable dari captureStream audio
+        const source = audioCtx.createMediaElementSource(video);
 
+        // Agar video masih bisa didengar selama proses (opsional)
+        // source.connect(audioCtx.destination); // nonaktifkan agar tidak double audio
+
+        // ── 4a. Filter degradasi dasar ────────────────────────────────────
         const lowpass = audioCtx.createBiquadFilter();
         lowpass.type = "lowpass";
+        let cutoff = 20000;
+        let dist = 0;
+        if (settings.audioQuality === 1) { cutoff = 1500; dist = 30; }
+        else if (settings.audioQuality === 2) { cutoff = 3000; dist = 5; }
+        else if (settings.audioQuality === 3) { cutoff = 8000; dist = 0; }
         lowpass.frequency.value = cutoff;
 
+        source.connect(lowpass);
         let lastNode = lowpass;
 
         if (dist > 0) {
@@ -419,20 +403,18 @@ export default function Page() {
           lastNode = distortion;
         }
 
-        // ── 2. Efek Audio Spesial ──
-        if (audioEffect === "tupai") {
-          // Pitch naik 2 oktaf via playbackRate trick: buffer manipulation
-          // Kita pakai ScriptProcessor sederhana untuk resample naik
+        // ── 4b. Efek Audio Spesial ────────────────────────────────────────
+        const effect = settings.audioEffect;
+
+        if (effect === "tupai") {
           const gainCompensate = audioCtx.createGain();
           gainCompensate.gain.value = 0.8;
           lastNode.connect(gainCompensate);
-          lastNode = gainCompensate;
-          // Tupai: highpass untuk suara chipmunk
           const hipass = audioCtx.createBiquadFilter();
           hipass.type = "highpass";
           hipass.frequency.value = 800;
           hipass.Q.value = 1.5;
-          lastNode.connect(hipass);
+          gainCompensate.connect(hipass);
           const boostHi = audioCtx.createBiquadFilter();
           boostHi.type = "peaking";
           boostHi.frequency.value = 3500;
@@ -441,8 +423,7 @@ export default function Page() {
           hipass.connect(boostHi);
           lastNode = boostHi;
 
-        } else if (audioEffect === "setan") {
-          // Suara setan: bass boost + lowpass ketat + distorsi berat
+        } else if (effect === "setan") {
           const bassBoost = audioCtx.createBiquadFilter();
           bassBoost.type = "lowshelf";
           bassBoost.frequency.value = 200;
@@ -459,78 +440,52 @@ export default function Page() {
           lopass2.connect(devilDist);
           lastNode = devilDist;
 
-        } else if (audioEffect === "bass") {
-          // Bass boost ekstrem
+        } else if (effect === "bass") {
           const sub = audioCtx.createBiquadFilter();
-          sub.type = "peaking";
-          sub.frequency.value = 60;
-          sub.gain.value = 16;
-          sub.Q.value = 1.2;
+          sub.type = "peaking"; sub.frequency.value = 60; sub.gain.value = 16; sub.Q.value = 1.2;
           lastNode.connect(sub);
           const mid = audioCtx.createBiquadFilter();
-          mid.type = "peaking";
-          mid.frequency.value = 140;
-          mid.gain.value = 12;
-          mid.Q.value = 1.0;
+          mid.type = "peaking"; mid.frequency.value = 140; mid.gain.value = 12; mid.Q.value = 1.0;
           sub.connect(mid);
           const hiCut = audioCtx.createBiquadFilter();
-          hiCut.type = "highshelf";
-          hiCut.frequency.value = 3000;
-          hiCut.gain.value = -8;
+          hiCut.type = "highshelf"; hiCut.frequency.value = 3000; hiCut.gain.value = -8;
           mid.connect(hiCut);
           lastNode = hiCut;
 
-        } else if (audioEffect === "megaphone") {
-          // Megaphone / pengeras jalan: bandpass sempit + distorsi ringan
+        } else if (effect === "megaphone") {
           const band = audioCtx.createBiquadFilter();
-          band.type = "bandpass";
-          band.frequency.value = 1800;
-          band.Q.value = 0.7;
+          band.type = "bandpass"; band.frequency.value = 1800; band.Q.value = 0.7;
           lastNode.connect(band);
           const clip = audioCtx.createWaveShaper();
           clip.curve = makeDistortionCurve(40);
           band.connect(clip);
           const presence = audioCtx.createBiquadFilter();
-          presence.type = "peaking";
-          presence.frequency.value = 2400;
-          presence.gain.value = 10;
-          presence.Q.value = 1.5;
+          presence.type = "peaking"; presence.frequency.value = 2400; presence.gain.value = 10; presence.Q.value = 1.5;
           clip.connect(presence);
           lastNode = presence;
 
-        } else if (audioEffect === "cave") {
-          // Efek gua / echo: convolver dengan impulse buatan
+        } else if (effect === "cave") {
           const bufLen = audioCtx.sampleRate * 2.5;
           const irBuf = audioCtx.createBuffer(2, bufLen, audioCtx.sampleRate);
           for (let ch = 0; ch < 2; ch++) {
             const d = irBuf.getChannelData(ch);
-            for (let i = 0; i < bufLen; i++) {
-              d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufLen, 2.5);
-            }
+            for (let i = 0; i < bufLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufLen, 2.5);
           }
           const convolver = audioCtx.createConvolver();
           convolver.buffer = irBuf;
           lastNode.connect(convolver);
-          const wetGain = audioCtx.createGain();
-          wetGain.gain.value = 0.6;
+          const wetGain = audioCtx.createGain(); wetGain.gain.value = 0.6;
           convolver.connect(wetGain);
-          const dryGain = audioCtx.createGain();
-          dryGain.gain.value = 0.5;
+          const dryGain = audioCtx.createGain(); dryGain.gain.value = 0.5;
           lastNode.connect(dryGain);
-          // Mix dry + wet via merger
-          const merger = audioCtx.createGain();
-          merger.gain.value = 1;
-          wetGain.connect(merger);
-          dryGain.connect(merger);
+          const merger = audioCtx.createGain(); merger.gain.value = 1;
+          wetGain.connect(merger); dryGain.connect(merger);
           lastNode = merger;
 
-        } else if (audioEffect === "robot") {
-          // Robot: ring modulator (oscillator * signal)
+        } else if (effect === "robot") {
           const ringOsc = audioCtx.createOscillator();
-          ringOsc.frequency.value = 50;
-          ringOsc.type = "sine";
-          const ringGain = audioCtx.createGain();
-          ringGain.gain.value = 0;
+          ringOsc.frequency.value = 50; ringOsc.type = "sine";
+          const ringGain = audioCtx.createGain(); ringGain.gain.value = 0;
           ringOsc.connect(ringGain.gain);
           lastNode.connect(ringGain);
           ringOsc.start();
@@ -538,46 +493,31 @@ export default function Page() {
           robotDist.curve = makeDistortionCurve(20);
           ringGain.connect(robotDist);
           const notch = audioCtx.createBiquadFilter();
-          notch.type = "notch";
-          notch.frequency.value = 1000;
-          notch.Q.value = 5;
+          notch.type = "notch"; notch.frequency.value = 1000; notch.Q.value = 5;
           robotDist.connect(notch);
           lastNode = notch;
 
-        } else if (audioEffect === "vhs") {
-          // VHS / kaset lawas: flutter + wow (LFO pada gain) + saturate ringan
+        } else if (effect === "vhs") {
           const vhsDist = audioCtx.createWaveShaper();
           vhsDist.curve = makeDistortionCurve(15);
           lastNode.connect(vhsDist);
-          const wow = audioCtx.createGain();
-          wow.gain.value = 1;
+          const wow = audioCtx.createGain(); wow.gain.value = 1;
           const lfo = audioCtx.createOscillator();
-          lfo.frequency.value = 2.8;
-          lfo.type = "sine";
-          const lfoGain = audioCtx.createGain();
-          lfoGain.gain.value = 0.08;
-          lfo.connect(lfoGain);
-          lfoGain.connect(wow.gain);
-          lfo.start();
+          lfo.frequency.value = 2.8; lfo.type = "sine";
+          const lfoGain = audioCtx.createGain(); lfoGain.gain.value = 0.08;
+          lfo.connect(lfoGain); lfoGain.connect(wow.gain); lfo.start();
           vhsDist.connect(wow);
           const hiss = audioCtx.createBiquadFilter();
-          hiss.type = "highshelf";
-          hiss.frequency.value = 6000;
-          hiss.gain.value = -12;
+          hiss.type = "highshelf"; hiss.frequency.value = 6000; hiss.gain.value = -12;
           wow.connect(hiss);
           lastNode = hiss;
 
-        } else if (audioEffect === "telephone") {
-          // Telefon jadul: bandpass sempit 300-3400 Hz
+        } else if (effect === "telephone") {
           const hp = audioCtx.createBiquadFilter();
-          hp.type = "highpass";
-          hp.frequency.value = 300;
-          hp.Q.value = 0.5;
+          hp.type = "highpass"; hp.frequency.value = 300; hp.Q.value = 0.5;
           lastNode.connect(hp);
           const lp2 = audioCtx.createBiquadFilter();
-          lp2.type = "lowpass";
-          lp2.frequency.value = 3400;
-          lp2.Q.value = 0.5;
+          lp2.type = "lowpass"; lp2.frequency.value = 3400; lp2.Q.value = 0.5;
           hp.connect(lp2);
           const telDist = audioCtx.createWaveShaper();
           telDist.curve = makeDistortionCurve(8);
@@ -586,88 +526,179 @@ export default function Page() {
         }
 
         const dest = audioCtx.createMediaStreamDestination();
-        source.connect(lowpass);
         lastNode.connect(dest);
-        
-        audioTracks = dest.stream.getAudioTracks();
+        finalAudioTracks = dest.stream.getAudioTracks();
       }
 
+      // ── 5. Buat MediaRecorder ───────────────────────────────────────────
       const combined = new MediaStream([
         canvasStream.getVideoTracks()[0],
-        ...audioTracks,
+        ...finalAudioTracks,
       ]);
 
       let mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
       let ext = "mp4";
-
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         mimeType = "video/webm;codecs=vp8,opus";
         ext = "webm";
-        if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = "video/webm";
+        if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = "video/webm"; }
       }
-
       setFileExt(ext);
 
       let targetVBitrate = 1_000_000;
-      if (videoQuality === 1) targetVBitrate = 80_000; 
-      else if (videoQuality === 2) targetVBitrate = 200_000; 
-      else if (videoQuality === 3) targetVBitrate = 500_000; 
+      if (settings.videoQuality === 1) targetVBitrate = 80_000;
+      else if (settings.videoQuality === 2) targetVBitrate = 200_000;
+      else if (settings.videoQuality === 3) targetVBitrate = 500_000;
 
       recorder = new MediaRecorder(combined, {
         mimeType,
         videoBitsPerSecond: targetVBitrate,
-        audioBitsPerSecond: 64_000, 
+        audioBitsPerSecond: 64_000,
       });
+      recorderRef.current = recorder;
 
-      const chunks = [];
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      const stopped = new Promise(resolve => recorder.onstop = resolve);
-      
-      recorder.start(); 
+      // ── 6. Mulai recording & draw loop ──────────────────────────────────
+      // KRITIS: recorder.start() TANPA argumen = timeslice besar = lebih reliable.
+      // Kita request data setiap 1 detik agar tidak kehilangan data saat video panjang.
+      recorder.start(1000);
 
-      const progressTimer = setInterval(() => {
-        if (video.duration > 0) {
-          setProgress(Math.min(99, Math.round((video.currentTime / video.duration) * 100)));
-        }
-      }, 500);
+      // ── 7. Draw loop via setInterval (tidak bergantung pada rAF visibility) ──
+      // setInterval tidak di-throttle oleh browser saat tab background (berbeda dengan rAF)
+      const frameInterval = Math.max(1000 / settings.fpsTarget, 33); // min 33ms = max ~30fps
+      drawTimer = setInterval(() => {
+        if (isCancelledRef.current) return;
+        drawFrameToCanvas(video, canvas, pCanvas, settings);
+      }, frameInterval);
+
+      // ── 8. Play video & tunggu selesai ──────────────────────────────────
+      // KRITIS: unmute video agar MediaElementSource bisa mengambil audio
+      video.muted = false;
+      video.volume = 1.0;
 
       await video.play();
-      await waitForVideoToFinish(video);
 
-      clearInterval(progressTimer);
+      const videoDuration = video.duration;
 
+      // Tunggu video selesai dengan cara paling robust:
+      // Polling currentTime via Promise, dengan multiple fallback
+      await new Promise((resolve) => {
+        let resolved = false;
+
+        const finish = (reason) => {
+          if (resolved) return;
+          resolved = true;
+          console.log(`[Burikin] Video selesai via: ${reason}`);
+          video.removeEventListener("ended", onEnded);
+          video.removeEventListener("pause", onPause);
+          clearInterval(pollingId);
+          clearTimeout(watchdogId);
+          resolve();
+        };
+
+        // Event listener utama
+        const onEnded = () => finish("ended event");
+        video.addEventListener("ended", onEnded);
+
+        // Fallback 1: jika video di-pause di akhir (beberapa browser)
+        const onPause = () => {
+          const remaining = videoDuration - video.currentTime;
+          if (remaining < 0.5) finish("pause near end");
+        };
+        video.addEventListener("pause", onPause);
+
+        // Fallback 2: polling currentTime — ini yang paling robust untuk semua skenario
+        const pollingId = setInterval(() => {
+          if (isCancelledRef.current) { finish("cancelled"); return; }
+          if (!video.paused && !video.ended) {
+            // Update progress bar
+            if (videoDuration > 0) {
+              const pct = Math.min(99, Math.round((video.currentTime / videoDuration) * 100));
+              setProgress(pct);
+            }
+          }
+          // Cek apakah sudah di akhir
+          if (video.ended || (videoDuration > 0 && video.currentTime >= videoDuration - 0.2)) {
+            finish("polling reached end");
+          }
+        }, 250); // poll setiap 250ms — presisi cukup, tidak boros CPU
+
+        // Fallback 3: watchdog timer = durasi video + buffer 15 detik
+        const watchdogMs = (isFinite(videoDuration) && videoDuration > 0)
+          ? (videoDuration * 1000 + 15000)
+          : 10 * 60 * 1000; // 10 menit jika durasi tidak diketahui
+        const watchdogId = setTimeout(() => finish("watchdog timeout"), watchdogMs);
+      });
+
+      // ── 9. Selesai, stop semua ──────────────────────────────────────────
+      clearInterval(drawTimer); drawTimer = null;
+
+      // Draw frame terakhir untuk memastikan recorder dapat frame
+      drawFrameToCanvas(video, canvas, pCanvas, settings);
+
+      // Minta data terakhir sebelum stop
+      if (recorder.state === "recording") {
+        recorder.requestData();
+        await new Promise(r => setTimeout(r, 200)); // beri waktu data masuk
+      }
+
+      const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
       if (recorder.state !== "inactive") recorder.stop();
       await stopped;
 
-      if (audioCtxRef.current) {
-        await audioCtxRef.current.close();
+      // Tutup AudioContext
+      if (audioCtx && audioCtx.state !== "closed") {
+        await audioCtx.close();
         audioCtxRef.current = null;
       }
 
-      if (chunks.length === 0) throw new Error("Gagal merekam data. Pastikan kamu tidak pindah tab.");
+      // Cek apakah ada data
+      if (chunksRef.current.length === 0) {
+        throw new Error("Tidak ada data terekam. Coba lagi dan tetap di halaman ini.");
+      }
 
-      const blob = new Blob(chunks, { type: mimeType });
+      const blob = new Blob(chunksRef.current, { type: mimeType });
       const url = URL.createObjectURL(blob);
       setOutputURL(url);
       setProgress(100);
       setStatus("done");
 
-      video.loop = true;
+      // Kembalikan video ke mode preview
       video.muted = true;
-      video.play().catch(()=>{});
+      video.loop = true;
+      video.currentTime = 0;
+      video.play().catch(() => {});
+      setStatus((prev) => prev === "done" ? "done" : "previewing");
+      // Restart preview RAF
+      setStatus("done");
 
     } catch (err) {
-      console.error(err);
-      if (recorder && recorder.state !== "inactive") try { recorder.stop(); } catch (_) {}
-      if (audioCtxRef.current) {
-        try { await audioCtxRef.current.close(); } catch (_) {}
+      console.error("[Burikin] Error:", err);
+
+      if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+
+      if (recorder && recorder.state !== "inactive") {
+        try { recorder.stop(); } catch (_) {}
+      }
+
+      if (audioCtx && audioCtx.state !== "closed") {
+        try { await audioCtx.close(); } catch (_) {}
         audioCtxRef.current = null;
       }
+
+      // Kembalikan video ke mode normal
+      const video = videoRef.current;
+      if (video) {
+        video.muted = true;
+        video.loop = true;
+        try { video.play(); } catch (_) {}
+      }
+
       setErrorMsg("Gagal memproses: " + (err?.message || "error tidak diketahui"));
-      setStatus("error");
+      setStatus("previewing"); // kembali ke preview
     }
   };
 
@@ -675,52 +706,36 @@ export default function Page() {
     if (!fileName) return `burik.${fileExt}`;
     const dotIndex = fileName.lastIndexOf(".");
     const baseName = dotIndex !== -1 ? fileName.substring(0, dotIndex) : fileName;
-    
     let affix = "_burik";
     if (colorFilter === 1) affix += "_majapahit";
     if (stretchFactor > 1) affix += "_gepeng";
-    
     return `${baseName}${affix}.${fileExt}`;
   };
 
-  // Fungsi Helper untuk Konten Modal
   const renderModalContent = () => {
     switch (activeModal) {
       case "privacy":
         return (
           <>
             <h2 style={styles.modalTitle}>Privacy Policy</h2>
-            <p style={styles.modalText}>
-              Privasi Anda sangat penting bagi kami. Aplikasi <strong>Burikin Aja</strong> dirancang untuk memproses seluruh manipulasi video secara 100% lokal di perangkat Anda (client-side). 
-            </p>
-            <p style={styles.modalText}>
-              Kami <strong>tidak pernah</strong> mengunggah, menyimpan, atau membagikan file video Anda ke server kami atau pihak ketiga mana pun. Semua pemrosesan menggunakan tenaga CPU dan GPU browser Anda secara langsung. Oleh karena itu, data Anda terjamin keamanannya dan tidak akan meninggalkan perangkat Anda.
-            </p>
+            <p style={styles.modalText}>Privasi Anda sangat penting bagi kami. Aplikasi <strong>Burikin Aja</strong> dirancang untuk memproses seluruh manipulasi video secara 100% lokal di perangkat Anda (client-side).</p>
+            <p style={styles.modalText}>Kami <strong>tidak pernah</strong> mengunggah, menyimpan, atau membagikan file video Anda ke server kami atau pihak ketiga mana pun.</p>
           </>
         );
       case "tos":
         return (
           <>
             <h2 style={styles.modalTitle}>Terms of Service</h2>
-            <p style={styles.modalText}>
-              Dengan menggunakan layanan <strong>Burikin Aja</strong>, Anda setuju untuk menggunakan alat ini secara bertanggung jawab.
-            </p>
-            <p style={styles.modalText}>
-              Layanan ini disediakan "sebagaimana adanya" (as is) tanpa jaminan apa pun, baik tersurat maupun tersirat. Kami tidak bertanggung jawab atas hasil editan video yang diubah pengguna atau kerusakan file yang terjadi selama proses rendering di perangkat Anda. Pengguna dilarang memproses materi ilegal atau yang melanggar hukum hak cipta.
-            </p>
+            <p style={styles.modalText}>Dengan menggunakan layanan <strong>Burikin Aja</strong>, Anda setuju untuk menggunakan alat ini secara bertanggung jawab.</p>
+            <p style={styles.modalText}>Layanan ini disediakan "sebagaimana adanya" tanpa jaminan apa pun. Pengguna dilarang memproses materi ilegal atau yang melanggar hukum hak cipta.</p>
           </>
         );
       case "contact":
         return (
           <>
             <h2 style={styles.modalTitle}>Contact Us</h2>
-            <p style={styles.modalText}>
-              Punya pertanyaan, saran, atau menemukan bug? Kami sangat terbuka untuk menerima *feedback* dari Anda!
-            </p>
-            <p style={styles.modalText}>
-              Silakan hubungi kami atau bergabung ke komunitas melalui Saluran WhatsApp resmi kami:
-            </p>
-            <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{...styles.waLink, display: "inline-block", marginTop: 10}}>
+            <p style={styles.modalText}>Punya pertanyaan, saran, atau menemukan bug?</p>
+            <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{ ...styles.waLink, display: "inline-block", marginTop: 10 }}>
               Bergabung ke Komunitas WhatsApp
             </a>
           </>
@@ -729,16 +744,11 @@ export default function Page() {
         return (
           <>
             <h2 style={styles.modalTitle}>About Us</h2>
-            <p style={styles.modalText}>
-              <strong>Burikin Aja</strong> adalah proyek independen yang dibangun oleh <strong>zals</strong>. 
-            </p>
-            <p style={styles.modalText}>
-              Terinspirasi dari tren meme video dengan kualitas rendah (buram, patah-patah, gepeng), alat ini diciptakan untuk memudahkan siapa saja membuat video "shitpost" atau retro tanpa perlu menggunakan software editing berat. Semua dapat dilakukan langsung dari browser web favorit Anda secara gratis.
-            </p>
+            <p style={styles.modalText}><strong>Burikin Aja</strong> adalah proyek independen yang dibangun oleh <strong>zals</strong>.</p>
+            <p style={styles.modalText}>Terinspirasi dari tren meme video dengan kualitas rendah, alat ini diciptakan untuk memudahkan siapa saja membuat video "shitpost" atau retro tanpa perlu software editing berat.</p>
           </>
         );
-      default:
-        return null;
+      default: return null;
     }
   };
 
@@ -752,6 +762,7 @@ export default function Page() {
         </svg>
         <span style={styles.sidebarBlogLabel}>BLOG</span>
       </a>
+
       <header style={styles.headerBar}>
         <div style={styles.credits}>
           <span style={styles.visitorBadge}>
@@ -772,9 +783,7 @@ export default function Page() {
         <div style={styles.heroInner}>
           <div style={styles.eyebrow}>// NO SIGNAL — PROSES LOKAL DI PERANGKATMU</div>
           <h1 style={styles.h1}>BURIKIN-AJA<span style={{ color: "var(--amber)" }}>.</span></h1>
-          <p style={styles.tagline}>
-            Bikin video burik kaya direpost berkali-kali, atau bikin videonya gepeng absurd buat meme dengan mudah.
-          </p>
+          <p style={styles.tagline}>Bikin video burik kaya direpost berkali-kali, atau bikin videonya gepeng absurd buat meme dengan mudah.</p>
         </div>
       </section>
 
@@ -783,25 +792,17 @@ export default function Page() {
       <section style={styles.panel}>
         {/* KARTU PILIH MEDIA */}
         <div style={styles.mediaCardRow}>
-          {/* Kartu Video */}
           <button
-            style={{
-              ...styles.mediaCard,
-              borderColor: videoURL ? "var(--amber)" : "var(--line)",
-              background: videoURL ? "rgba(255,186,0,0.06)" : "var(--panel)",
-            }}
+            style={{ ...styles.mediaCard, borderColor: videoURL ? "var(--amber)" : "var(--line)", background: videoURL ? "rgba(255,186,0,0.06)" : "var(--panel)" }}
             onClick={() => fileInputRef.current?.click()}
           >
             <div style={styles.mediaCardIcon}>
               <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
                 stroke={videoURL ? "var(--amber)" : "var(--dim)"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                <line x1="7" y1="2" x2="7" y2="22" />
-                <line x1="17" y1="2" x2="17" y2="22" />
-                <line x1="2" y1="12" x2="22" y2="12" />
-                <line x1="2" y1="7" x2="7" y2="7" />
-                <line x1="2" y1="17" x2="7" y2="17" />
-                <line x1="17" y1="17" x2="22" y2="17" />
+                <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
+                <line x1="2" y1="12" x2="22" y2="12" /><line x1="2" y1="7" x2="7" y2="7" />
+                <line x1="2" y1="17" x2="7" y2="17" /><line x1="17" y1="17" x2="22" y2="17" />
                 <line x1="17" y1="7" x2="22" y2="7" />
               </svg>
             </div>
@@ -821,13 +822,8 @@ export default function Page() {
           </button>
           <input ref={fileInputRef} type="file" accept="video/*" onChange={onPickFile} style={{ display: "none" }} />
 
-          {/* Kartu Gambar */}
           <button
-            style={{
-              ...styles.mediaCard,
-              borderColor: imageURL ? "var(--green)" : "var(--line)",
-              background: imageURL ? "rgba(0,255,136,0.05)" : "var(--panel)",
-            }}
+            style={{ ...styles.mediaCard, borderColor: imageURL ? "var(--green)" : "var(--line)", background: imageURL ? "rgba(0,255,136,0.05)" : "var(--panel)" }}
             onClick={() => imageInputRef.current?.click()}
           >
             <div style={styles.mediaCardIcon}>
@@ -857,7 +853,8 @@ export default function Page() {
 
         {videoURL && (
           <>
-            <video ref={videoRef} src={videoURL} onLoadedMetadata={onLoadedMeta} style={{ display: "none" }} playsInline muted />
+            <video ref={videoRef} src={videoURL} onLoadedMetadata={onLoadedMeta} style={{ display: "none" }} playsInline />
+            {/* Video tidak di-mute permanen di sini — akan diatur saat proses */}
 
             <div style={styles.previewWrap}>
               {status === "processing" && (
@@ -865,7 +862,7 @@ export default function Page() {
                   <div style={styles.spinner}></div>
                   <h3 style={{ color: "var(--amber)", margin: "10px 0 5px" }}>MEMPROSES: {progress}%</h3>
                   <p style={{ color: "#fff", fontSize: 12, lineHeight: 1.5 }}>
-                    ⚠️ <b>PENTING:</b> Jangan pindah tab browser atau mematikan layar HP selama proses ini berjalan. <br/> Jika dipindah, durasi video akan terpotong / menjadi 1 detik.
+                    ⚠️ <b>PENTING:</b> Jangan pindah tab browser atau mematikan layar HP selama proses ini berjalan.
                   </p>
                 </div>
               )}
@@ -876,20 +873,13 @@ export default function Page() {
 
             <div style={styles.presetRow}>
               {Object.keys(PRESETS).map((key) => (
-                <button
-                  key={key}
-                  onClick={() => applyPreset(key)}
-                  style={{ ...styles.presetBtn, ...(presetKey === key ? styles.presetBtnActive : {}) }}
-                >
+                <button key={key} onClick={() => applyPreset(key)}
+                  style={{ ...styles.presetBtn, ...(presetKey === key ? styles.presetBtnActive : {}) }}>
                   {PRESETS[key].label}
                 </button>
               ))}
-              <button 
-                style={{ ...styles.presetBtn, ...(presetKey === "custom" ? styles.presetBtnActive : {}) }}
-                onClick={() => setPresetKey("custom")}
-              >
-                KUSTOM
-              </button>
+              <button style={{ ...styles.presetBtn, ...(presetKey === "custom" ? styles.presetBtnActive : {}) }}
+                onClick={() => setPresetKey("custom")}>KUSTOM</button>
             </div>
 
             <div style={styles.settingsGrid}>
@@ -940,24 +930,18 @@ export default function Page() {
                 <div style={styles.setSectionTitle}>🎙️ EFEK AUDIO SPESIAL</div>
                 <div style={styles.audioEffectGrid}>
                   {[
-                    { key: "none",      emoji: "🔇", label: "NORMAL",    desc: "Asli" },
-                    { key: "tupai",     emoji: "🐿️", label: "TUPAI",     desc: "Suara chipmunk" },
-                    { key: "setan",     emoji: "😈", label: "SETAN",     desc: "Bass gelap" },
-                    { key: "bass",      emoji: "💥", label: "BASS",      desc: "Sub bass pecah" },
+                    { key: "none", emoji: "🔇", label: "NORMAL", desc: "Asli" },
+                    { key: "tupai", emoji: "🐿️", label: "TUPAI", desc: "Suara chipmunk" },
+                    { key: "setan", emoji: "😈", label: "SETAN", desc: "Bass gelap" },
+                    { key: "bass", emoji: "💥", label: "BASS", desc: "Sub bass pecah" },
                     { key: "megaphone", emoji: "📣", label: "MEGAPHONE", desc: "Pengeras jalan" },
-                    { key: "cave",      emoji: "🏔️", label: "GUA",       desc: "Echo & reverb" },
-                    { key: "robot",     emoji: "🤖", label: "ROBOT",     desc: "Ring modulator" },
-                    { key: "vhs",       emoji: "📼", label: "VHS",       desc: "Kaset lawas" },
-                    { key: "telephone", emoji: "☎️", label: "TELEPON",   desc: "Jaringan 2G" },
+                    { key: "cave", emoji: "🏔️", label: "GUA", desc: "Echo & reverb" },
+                    { key: "robot", emoji: "🤖", label: "ROBOT", desc: "Ring modulator" },
+                    { key: "vhs", emoji: "📼", label: "VHS", desc: "Kaset lawas" },
+                    { key: "telephone", emoji: "☎️", label: "TELEPON", desc: "Jaringan 2G" },
                   ].map(({ key, emoji, label, desc }) => (
-                    <button
-                      key={key}
-                      onClick={() => setAudioEffect(key)}
-                      style={{
-                        ...styles.audioEffectBtn,
-                        ...(audioEffect === key ? styles.audioEffectBtnActive : {}),
-                      }}
-                    >
+                    <button key={key} onClick={() => setAudioEffect(key)}
+                      style={{ ...styles.audioEffectBtn, ...(audioEffect === key ? styles.audioEffectBtnActive : {}) }}>
                       <span style={styles.audioEffectEmoji}>{emoji}</span>
                       <span style={styles.audioEffectLabel}>{label}</span>
                       <span style={styles.audioEffectDesc}>{desc}</span>
@@ -1001,11 +985,7 @@ export default function Page() {
             </div>
 
             <button
-              style={{
-                ...styles.processBtn,
-                opacity: status === "processing" ? 0.6 : 1,
-                cursor: status === "processing" ? "not-allowed" : "pointer",
-              }}
+              style={{ ...styles.processBtn, opacity: status === "processing" ? 0.6 : 1, cursor: status === "processing" ? "not-allowed" : "pointer" }}
               disabled={!ready || status === "processing"}
               onClick={handleProcess}
             >
@@ -1031,90 +1011,39 @@ export default function Page() {
         {/* ===== SECTION BURIKIN GAMBAR ===== */}
         {imageURL && (
           <div style={styles.imageBurikSection}>
-            {/* Header */}
             <div style={styles.imageBurikHeader}>
               <span style={styles.imageBurikTitle}>🖼️ BURIKIN GAMBAR</span>
               <span style={styles.imageBurikBadge}>● LIVE PREVIEW</span>
             </div>
-
-            {/* Layout: Preview + Kontrol side by side */}
             <div style={styles.imageBurikBody}>
-              {/* Kiri: Preview Canvas */}
               <div style={styles.imageBurikPreviewWrap}>
                 <canvas ref={imageCanvasRef} style={styles.imageBurikCanvas} />
               </div>
-
-              {/* Kanan: Kontrol */}
               <div style={styles.imageBurikControls}>
-
-                {/* Slider Level Burik */}
                 <div style={styles.sliderGroup}>
                   <div style={styles.sliderLabelRow}>
                     <span style={styles.setTitle}>TINGKAT BURIK</span>
-                    <span style={styles.sliderValue}>{
-                      imagePixel === 1 ? "JERNIH" :
-                      imagePixel <= 4 ? "DIKIT" :
-                      imagePixel <= 8 ? "LUMAYAN" :
-                      imagePixel <= 16 ? "PARAH" :
-                      imagePixel <= 32 ? "8-BIT" : "MINECRAFT"
-                    }</span>
+                    <span style={styles.sliderValue}>{imagePixel === 1 ? "JERNIH" : imagePixel <= 4 ? "DIKIT" : imagePixel <= 8 ? "LUMAYAN" : imagePixel <= 16 ? "PARAH" : imagePixel <= 32 ? "8-BIT" : "MINECRAFT"}</span>
                   </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={5}
-                    step={1}
-                    value={[1,4,8,16,32,64].indexOf(imagePixel) === -1 ? 0 : [1,4,8,16,32,64].indexOf(imagePixel)}
-                    onChange={(e) => {
-                      const levels = [1,4,8,16,32,64];
-                      setImagePixel(levels[Number(e.target.value)]);
-                    }}
-                    style={styles.burikSlider}
-                  />
+                  <input type="range" min={0} max={5} step={1}
+                    value={[1, 4, 8, 16, 32, 64].indexOf(imagePixel) === -1 ? 0 : [1, 4, 8, 16, 32, 64].indexOf(imagePixel)}
+                    onChange={(e) => { const levels = [1, 4, 8, 16, 32, 64]; setImagePixel(levels[Number(e.target.value)]); }}
+                    style={styles.burikSlider} />
                   <div style={styles.sliderTicks}>
-                    <span>😇</span>
-                    <span>😬</span>
-                    <span>🤢</span>
-                    <span>💀</span>
-                    <span>👾</span>
-                    <span>🧱</span>
+                    <span>😇</span><span>😬</span><span>🤢</span><span>💀</span><span>👾</span><span>🧱</span>
                   </div>
                 </div>
-
-                {/* Divider */}
                 <div style={{ borderTop: "1px dashed var(--line)", margin: "14px 0" }} />
-
-                {/* Filter Warna */}
                 <div style={styles.setLabel}>
                   <span style={styles.setTitle}>FILTER WARNA</span>
                   <div style={styles.filterBtnRow}>
-                    {[
-                      { val: 0, label: "NORMAL" },
-                      { val: 1, label: "B&W" },
-                      { val: 2, label: "SEPIA" },
-                      { val: 3, label: "FRIED" },
-                    ].map(({ val, label }) => (
-                      <button
-                        key={val}
-                        onClick={() => setImageFilter(val)}
-                        style={{
-                          ...styles.filterBtn,
-                          ...(imageFilter === val ? styles.filterBtnActive : {}),
-                        }}
-                      >
-                        {label}
-                      </button>
+                    {[{ val: 0, label: "NORMAL" }, { val: 1, label: "B&W" }, { val: 2, label: "SEPIA" }, { val: 3, label: "FRIED" }].map(({ val, label }) => (
+                      <button key={val} onClick={() => setImageFilter(val)}
+                        style={{ ...styles.filterBtn, ...(imageFilter === val ? styles.filterBtnActive : {}) }}>{label}</button>
                     ))}
                   </div>
                 </div>
-
-                {/* Download Button */}
-                <button
-                  style={styles.imageDlBtn}
-                  onClick={downloadBurikImage}
-                >
-                  ⬇ DOWNLOAD
-                </button>
+                <button style={styles.imageDlBtn} onClick={downloadBurikImage}>⬇ DOWNLOAD</button>
               </div>
             </div>
           </div>
@@ -1124,42 +1053,32 @@ export default function Page() {
       <section style={styles.seoArticle}>
         <div style={styles.seoContent}>
           <h2 style={styles.seoH2}>Tentang Burikin Aja</h2>
-          <p style={styles.seoP}>
-            <strong>Burikin Aja</strong> adalah sebuah *web app* gratis untuk mengedit dan menurunkan kualitas video secara sengaja. 
-            Ingin membuat video terlihat seperti direkam menggunakan HP jadul, hasil kiriman WhatsApp yang di-<em>forward</em> berkali-kali, atau membuat meme absurd dengan rasio layar gepeng? Kamu berada di tempat yang tepat.
-          </p>
-          <p style={styles.seoP}>
-            Aplikasi ini berjalan <strong>100% secara lokal di browser (client-side)</strong>. Kami tidak pernah mengunggah, menyimpan, atau menyebarkan video Anda ke server mana pun, sehingga <strong>privasi dan keamanan data Anda terjamin sepenuhnya</strong>.
-          </p>
-
+          <p style={styles.seoP}><strong>Burikin Aja</strong> adalah sebuah web app gratis untuk mengedit dan menurunkan kualitas video secara sengaja. Ingin membuat video terlihat seperti direkam menggunakan HP jadul, hasil kiriman WhatsApp yang di-forward berkali-kali, atau membuat meme absurd dengan rasio layar gepeng?</p>
+          <p style={styles.seoP}>Aplikasi ini berjalan <strong>100% secara lokal di browser (client-side)</strong>. Kami tidak pernah mengunggah, menyimpan, atau menyebarkan video Anda ke server mana pun.</p>
           <h3 style={styles.seoH3}>Fitur Utama & Kustomisasi</h3>
           <ul style={styles.seoUl}>
-            <li style={styles.seoLi}><strong>Turunkan Resolusi & Bitrate:</strong> Paksa video resolusi tinggi menjadi buram, patah-patah, dan penuh kotak pixel art (kompresi parah).</li>
+            <li style={styles.seoLi}><strong>Turunkan Resolusi & Bitrate:</strong> Paksa video resolusi tinggi menjadi buram, patah-patah, dan penuh kotak pixel art.</li>
             <li style={styles.seoLi}><strong>Efek Audio Rusak:</strong> Buat suara video terdengar "mendem", pecah, atau seperti kualitas rekaman kaset rusak.</li>
-            <li style={styles.seoLi}><strong>Gepengin Video (Aspect Ratio):</strong> Ubah bentuk video normal menjadi super lebar (wide) atau sangat kurus memanjang untuk kebutuhan konten meme.</li>
-            <li style={styles.seoLi}><strong>Filter Visual Majapahit:</strong> Terapkan filter *grayscale* ekstrem atau *Deep Fried* yang mencolok langsung saat diproses.</li>
+            <li style={styles.seoLi}><strong>Gepengin Video:</strong> Ubah bentuk video normal menjadi super lebar atau sangat kurus memanjang.</li>
+            <li style={styles.seoLi}><strong>Filter Visual:</strong> Terapkan filter grayscale ekstrem atau Deep Fried yang mencolok.</li>
           </ul>
-
           <h3 style={styles.seoH3}>Cara Penggunaan</h3>
           <ol style={styles.seoOl}>
             <li style={styles.seoLi}>Klik tombol <strong>PILIH VIDEO</strong> dan masukkan video dari galeri HP atau komputer Anda.</li>
             <li style={styles.seoLi}>Perhatikan <strong>Live Preview</strong> untuk melihat efek secara langsung.</li>
-            <li style={styles.seoLi}>Pilih *Preset* (Ringan, Sedang, Parah, Majapahit) atau atur sendiri parameter di bagian bawah sesuka hati.</li>
-            <li style={styles.seoLi}>Klik <strong>BIKININ & DOWNLOAD</strong>. <em>Catatan: Tetap berada di halaman ini selama proses berjalan agar durasi video tidak terpotong.</em></li>
+            <li style={styles.seoLi}>Pilih Preset atau atur sendiri parameter sesuka hati.</li>
+            <li style={styles.seoLi}>Klik <strong>BIKININ & DOWNLOAD</strong>. Tetap berada di halaman ini selama proses berjalan.</li>
           </ol>
-
           <h3 style={styles.seoH3}>Pertanyaan Umum (FAQ)</h3>
           <div style={styles.faqBox}>
-            <p style={styles.seoP}><strong>T: Mengapa durasi video hasil download saya hanya 1 detik?</strong><br/>
-            J: Hal ini terjadi karena Anda memindahkan *tab browser* atau menutup layar saat video sedang diproses. Browser modern akan menghentikan perekaman kanvas saat aplikasi berjalan di *background* untuk menghemat baterai.</p>
-            
-            <p style={styles.seoP}><strong>T: Apakah layanan ini gratis? Apakah ada batas durasi?</strong><br/>
-            J: Sepenuhnya gratis! Namun disarankan memproses video berdurasi di bawah 3 menit, karena proses *encoding* mengandalkan tenaga GPU dan CPU dari perangkat yang Anda gunakan.</p>
+            <p style={styles.seoP}><strong>T: Mengapa durasi video hasil download saya hanya 1 detik?</strong><br />
+              J: Ini sudah diperbaiki di versi terbaru! Sebelumnya masalah ini terjadi karena browser menghentikan perekaman saat tab berpindah. Sekarang sistem menggunakan <em>setInterval</em> untuk menggambar frame (bukan requestAnimationFrame) sehingga tetap berjalan meski tab di-minimize.</p>
+            <p style={styles.seoP}><strong>T: Apakah layanan ini gratis? Apakah ada batas durasi?</strong><br />
+              J: Sepenuhnya gratis! Disarankan memproses video di bawah 3 menit karena proses encoding mengandalkan CPU/GPU perangkat Anda.</p>
           </div>
         </div>
       </section>
 
-      {/* FOOTER NAVIGASI LEGAL (BISA DI-KLIK SEKARANG) */}
       <footer style={styles.footer}>
         <div style={styles.footerNav}>
           <a href="/privacy" style={styles.footerLink}>Privacy Policy</a>
@@ -1173,13 +1092,12 @@ export default function Page() {
           <a href="/blog" style={styles.footerLink}>Blog</a>
         </div>
         <p style={{ marginTop: 16 }}>
-          Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br/>
-          <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{color: "var(--amber)", textDecoration: "none"}}>Gabung Saluran WhatsApp</a>
+          Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br />
+          <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{ color: "var(--amber)", textDecoration: "none" }}>Gabung Saluran WhatsApp</a>
         </p>
         <p style={{ marginTop: 8, fontSize: 10, color: "var(--dim)", opacity: 0.7 }}>© {new Date().getFullYear()} Burikin Aja. All rights reserved.</p>
       </footer>
 
-      {/* MODAL POPUP UNTUK HALAMAN LEGAL */}
       {activeModal && (
         <div style={styles.modalOverlay} onClick={() => setActiveModal(null)}>
           <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
@@ -1194,227 +1112,35 @@ export default function Page() {
 
 const styles = {
   main: { minHeight: "100vh", maxWidth: 760, margin: "0 auto", padding: "0 18px 60px", position: "relative" },
-  
-  // SIDEBAR BLOG
-  sidebarBlog: {
-    position: "fixed",
-    left: 0,
-    top: "50%",
-    transform: "translateY(-50%)",
-    background: "var(--panel)",
-    border: "1px solid var(--line)",
-    borderLeft: "none",
-    borderRadius: "0 6px 6px 0",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 6,
-    padding: "14px 10px",
-    textDecoration: "none",
-    color: "var(--dim)",
-    zIndex: 100,
-    transition: "color 0.15s, borderColor 0.15s",
-  },
-  sidebarBlogLabel: {
-    fontFamily: "var(--mono-display)",
-    fontSize: 10,
-    letterSpacing: "0.12em",
-    writingMode: "vertical-rl",
-    textOrientation: "mixed",
-    transform: "rotate(180deg)",
-  },
-
-  // MEDIA CARDS
-  mediaCardRow: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 14,
-    marginBottom: 22,
-  },
-  mediaCard: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    padding: "28px 16px",
-    border: "2px dashed var(--line)",
-    borderRadius: 8,
-    background: "var(--panel)",
-    cursor: "pointer",
-    transition: "border-color 0.15s, background 0.15s",
-    minHeight: 140,
-  },
+  sidebarBlog: { position: "fixed", left: 0, top: "50%", transform: "translateY(-50%)", background: "var(--panel)", border: "1px solid var(--line)", borderLeft: "none", borderRadius: "0 6px 6px 0", display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "14px 10px", textDecoration: "none", color: "var(--dim)", zIndex: 100, transition: "color 0.15s, borderColor 0.15s" },
+  sidebarBlogLabel: { fontFamily: "var(--mono-display)", fontSize: 10, letterSpacing: "0.12em", writingMode: "vertical-rl", textOrientation: "mixed", transform: "rotate(180deg)" },
+  mediaCardRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 22 },
+  mediaCard: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: "28px 16px", border: "2px dashed var(--line)", borderRadius: 8, background: "var(--panel)", cursor: "pointer", transition: "border-color 0.15s, background 0.15s", minHeight: 140 },
   mediaCardIcon: { lineHeight: 1 },
   mediaCardLabel: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4 },
-
-  // IMAGE BURIK SECTION
-  imageBurikSection: {
-    marginTop: 32,
-    border: "1px solid var(--line)",
-    background: "var(--panel)",
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  imageBurikHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "12px 16px",
-    borderBottom: "1px solid var(--line)",
-    background: "rgba(255,255,255,0.02)",
-  },
-  imageBurikTitle: {
-    fontFamily: "var(--mono-display)",
-    fontSize: 13,
-    fontWeight: 700,
-    color: "var(--text)",
-  },
-  imageBurikBadge: {
-    fontFamily: "var(--mono-display)",
-    fontSize: 11,
-    color: "var(--danger)",
-    background: "rgba(0,0,0,0.4)",
-    padding: "2px 8px",
-    borderRadius: 4,
-  },
-  imageBurikBody: {
-    display: "flex",
-    flexDirection: "row",
-    gap: 0,
-  },
-  imageBurikPreviewWrap: {
-    flex: "0 0 55%",
-    background: "#000",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    borderRight: "1px solid var(--line)",
-    minHeight: 220,
-  },
-  imageBurikCanvas: {
-    width: "100%",
-    height: "auto",
-    maxHeight: 320,
-    objectFit: "contain",
-    display: "block",
-    imageRendering: "pixelated",
-  },
-  imageBurikControls: {
-    flex: 1,
-    padding: "16px 14px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 0,
-  },
-  // Slider styles
+  imageBurikSection: { marginTop: 32, border: "1px solid var(--line)", background: "var(--panel)", borderRadius: 8, overflow: "hidden" },
+  imageBurikHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "rgba(255,255,255,0.02)" },
+  imageBurikTitle: { fontFamily: "var(--mono-display)", fontSize: 13, fontWeight: 700, color: "var(--text)" },
+  imageBurikBadge: { fontFamily: "var(--mono-display)", fontSize: 11, color: "var(--danger)", background: "rgba(0,0,0,0.4)", padding: "2px 8px", borderRadius: 4 },
+  imageBurikBody: { display: "flex", flexDirection: "row", gap: 0 },
+  imageBurikPreviewWrap: { flex: "0 0 55%", background: "#000", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", borderRight: "1px solid var(--line)", minHeight: 220 },
+  imageBurikCanvas: { width: "100%", height: "auto", maxHeight: 320, objectFit: "contain", display: "block", imageRendering: "pixelated" },
+  imageBurikControls: { flex: 1, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 0 },
   sliderGroup: { display: "flex", flexDirection: "column", gap: 8 },
   sliderLabelRow: { display: "flex", justifyContent: "space-between", alignItems: "center" },
-  sliderValue: {
-    fontFamily: "var(--mono-display)",
-    fontSize: 10,
-    color: "var(--amber)",
-    background: "rgba(255,186,0,0.1)",
-    border: "1px solid var(--amber)",
-    padding: "2px 6px",
-    borderRadius: 3,
-    letterSpacing: "0.05em",
-  },
-  burikSlider: {
-    width: "100%",
-    accentColor: "var(--amber)",
-    cursor: "pointer",
-    height: 4,
-  },
-  sliderTicks: {
-    display: "flex",
-    justifyContent: "space-between",
-    fontSize: 14,
-    paddingTop: 2,
-  },
-  // Filter buttons
-  filterBtnRow: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 6,
-    marginTop: 8,
-  },
-  filterBtn: {
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid var(--line)",
-    color: "var(--dim)",
-    padding: "8px 4px",
-    fontSize: 11,
-    fontFamily: "var(--mono-display)",
-    fontWeight: 700,
-    letterSpacing: "0.05em",
-    cursor: "pointer",
-    borderRadius: 4,
-    transition: "all 0.1s",
-  },
-  filterBtnActive: {
-    background: "rgba(0,255,136,0.1)",
-    borderColor: "var(--green)",
-    color: "var(--green)",
-  },
-  imageDlBtn: {
-    marginTop: "auto",
-    paddingTop: 14,
-    width: "100%",
-    background: "var(--green)",
-    color: "#000",
-    border: "none",
-    padding: "12px 8px",
-    fontWeight: 800,
-    fontSize: 13,
-    fontFamily: "var(--mono-display)",
-    cursor: "pointer",
-    borderRadius: 4,
-    letterSpacing: "0.05em",
-  },
-
-  // AUDIO EFFECT GRID
-  audioEffectGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: 8,
-    marginTop: 10,
-  },
-  audioEffectBtn: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 3,
-    padding: "10px 6px",
-    background: "rgba(255,255,255,0.03)",
-    border: "1px solid var(--line)",
-    borderRadius: 6,
-    cursor: "pointer",
-    transition: "all 0.12s",
-  },
-  audioEffectBtnActive: {
-    background: "rgba(255,186,0,0.1)",
-    borderColor: "var(--amber)",
-  },
-  audioEffectEmoji: {
-    fontSize: 22,
-    lineHeight: 1,
-  },
-  audioEffectLabel: {
-    fontFamily: "var(--mono-display)",
-    fontSize: 10,
-    fontWeight: 700,
-    color: "var(--amber)",
-    letterSpacing: "0.06em",
-  },
-  audioEffectDesc: {
-    fontSize: 10,
-    color: "var(--dim)",
-    textAlign: "center",
-    lineHeight: 1.3,
-  },
-
+  sliderValue: { fontFamily: "var(--mono-display)", fontSize: 10, color: "var(--amber)", background: "rgba(255,186,0,0.1)", border: "1px solid var(--amber)", padding: "2px 6px", borderRadius: 3, letterSpacing: "0.05em" },
+  burikSlider: { width: "100%", accentColor: "var(--amber)", cursor: "pointer", height: 4 },
+  sliderTicks: { display: "flex", justifyContent: "space-between", fontSize: 14, paddingTop: 2 },
+  filterBtnRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 },
+  filterBtn: { background: "rgba(255,255,255,0.04)", border: "1px solid var(--line)", color: "var(--dim)", padding: "8px 4px", fontSize: 11, fontFamily: "var(--mono-display)", fontWeight: 700, letterSpacing: "0.05em", cursor: "pointer", borderRadius: 4, transition: "all 0.1s" },
+  filterBtnActive: { background: "rgba(0,255,136,0.1)", borderColor: "var(--green)", color: "var(--green)" },
+  imageDlBtn: { marginTop: "auto", paddingTop: 14, width: "100%", background: "var(--green)", color: "#000", border: "none", padding: "12px 8px", fontWeight: 800, fontSize: 13, fontFamily: "var(--mono-display)", cursor: "pointer", borderRadius: 4, letterSpacing: "0.05em" },
+  audioEffectGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 10 },
+  audioEffectBtn: { display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "10px 6px", background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 6, cursor: "pointer", transition: "all 0.12s" },
+  audioEffectBtnActive: { background: "rgba(255,186,0,0.1)", borderColor: "var(--amber)" },
+  audioEffectEmoji: { fontSize: 22, lineHeight: 1 },
+  audioEffectLabel: { fontFamily: "var(--mono-display)", fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: "0.06em" },
+  audioEffectDesc: { fontSize: 10, color: "var(--dim)", textAlign: "center", lineHeight: 1.3 },
   headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
   credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
   visitorBadge: { display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--panel)", border: "1px solid var(--line)", padding: "6px 10px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
@@ -1425,21 +1151,15 @@ const styles = {
   eyebrow: { fontFamily: "var(--mono-display)", fontSize: 12, letterSpacing: "0.08em", color: "var(--green)", marginBottom: 14 },
   h1: { fontFamily: "var(--mono-display)", fontSize: "clamp(40px, 10vw, 72px)", fontWeight: 800, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 },
   tagline: { marginTop: 14, color: "var(--dim)", fontSize: 14, lineHeight: 1.6, maxWidth: 480 },
-  
   adContainer: { marginTop: 24, marginBottom: 8, padding: 12, background: "rgba(255,255,255,0.03)", border: "1px dashed var(--line)", textAlign: "center", borderRadius: 8 },
   adLabel: { display: "block", fontSize: 10, color: "var(--dim)", marginBottom: 8, letterSpacing: "0.05em" },
-
   panel: { paddingTop: 28 },
   row: { display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" },
-  uploadBtn: { background: "var(--amber)", color: "#000", border: "none", padding: "12px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
-  fileName: { color: "var(--dim)", fontSize: 13, wordBreak: "break-all" },
   previewWrap: { position: "relative", marginTop: 22, border: "1px solid var(--line)", background: "#000", display: "flex", justifyContent: "center", overflow: "hidden" },
   previewCanvas: { width: "100%", height: "auto", maxHeight: "65vh", objectFit: "contain", display: "block" },
   recBadge: { position: "absolute", top: 8, right: 10, fontFamily: "var(--mono-display)", fontSize: 11, color: "var(--danger)", background: "rgba(0,0,0,0.6)", padding: "2px 6px", borderRadius: 4 },
-  
   processingOverlay: { position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10, textAlign: "center", padding: 20 },
   spinner: { width: 40, height: 40, border: "4px solid rgba(255,255,255,0.2)", borderTopColor: "var(--amber)", borderRadius: "50%", animation: "spin 1s linear infinite" },
-
   presetRow: { display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" },
   presetBtn: { background: "var(--panel)", border: "1px solid var(--line)", color: "var(--dim)", padding: "8px 14px", fontSize: 12, cursor: "pointer" },
   presetBtnActive: { borderColor: "var(--amber)", color: "var(--amber)" },
@@ -1454,7 +1174,6 @@ const styles = {
   resultBox: { marginTop: 26, border: "1px solid var(--line)", padding: 16, background: "var(--panel)" },
   resultVideo: { width: "100%", height: "auto", maxHeight: "65vh", objectFit: "contain", display: "block", background: "#000" },
   downloadLink: { display: "inline-block", marginTop: 14, color: "var(--amber)", fontFamily: "var(--mono-display)", fontSize: 13, textDecoration: "none", border: "1px solid var(--amber)", padding: "10px 16px" },
-  
   seoArticle: { marginTop: 40, borderTop: "1px solid var(--line)", paddingTop: 30 },
   seoContent: { background: "var(--panel)", border: "1px solid var(--line)", padding: 24, borderRadius: 8 },
   seoH2: { fontSize: 18, color: "var(--amber)", marginBottom: 12, fontFamily: "var(--mono-display)" },
@@ -1464,22 +1183,19 @@ const styles = {
   seoOl: { paddingLeft: 20, marginBottom: 16 },
   seoLi: { fontSize: 13, color: "var(--dim)", lineHeight: 1.6, marginBottom: 6 },
   faqBox: { borderLeft: "3px solid var(--amber)", paddingLeft: 14, marginTop: 10 },
-
   footer: { marginTop: 50, color: "var(--dim)", fontSize: 12, textAlign: "center", lineHeight: 1.6, paddingBottom: 20 },
   footerNav: { display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 },
   footerLink: { color: "var(--text)", textDecoration: "none", fontWeight: "bold", cursor: "pointer" },
   footerDot: { color: "var(--line)" },
-
-  // Style untuk Modal Popup
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 999, display: "flex", justifyContent: "center", alignItems: "center", padding: 20, backdropFilter: "blur(4px)" },
   modalContent: { background: "var(--panel)", border: "1px solid var(--amber)", borderRadius: 8, padding: "30px 24px", maxWidth: 500, width: "100%", maxHeight: "80vh", overflowY: "auto", position: "relative", textAlign: "left" },
   closeBtn: { position: "absolute", top: 12, right: 16, background: "transparent", border: "none", color: "var(--dim)", fontSize: 28, cursor: "pointer", lineHeight: 1 },
   modalTitle: { fontSize: 20, color: "var(--amber)", marginBottom: 16, fontFamily: "var(--mono-display)", borderBottom: "1px solid var(--line)", paddingBottom: 10 },
-  modalText: { fontSize: 14, color: "var(--text)", lineHeight: 1.7, marginBottom: 14 }
+  modalText: { fontSize: 14, color: "var(--text)", lineHeight: 1.7, marginBottom: 14 },
 };
 
-if (typeof document !== 'undefined') {
-  const style = document.createElement('style');
+if (typeof document !== "undefined") {
+  const style = document.createElement("style");
   style.innerHTML = `
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; }
