@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { LANGUAGES, DEFAULT_LANG, getTranslations } from "./i18n";
 
 // Preset mengubah state secara spesifik
 const PRESETS = {
@@ -142,6 +143,20 @@ export default function Page() {
 
   // State untuk Popup Legal
   const [activeModal, setActiveModal] = useState(null);
+
+  // State bahasa (language switcher)
+  const [lang, setLang] = useState(DEFAULT_LANG);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("burikin_lang");
+      if (saved && LANGUAGES.some((l) => l.code === saved)) setLang(saved);
+    } catch (_) {}
+  }, []);
+  const changeLang = (code) => {
+    setLang(code);
+    try { window.localStorage.setItem("burikin_lang", code); } catch (_) {}
+  };
+  const t = getTranslations(lang);
 
   // States Parameter Lanjutan
   const [resHeight, setResHeight] = useState(240);
@@ -764,7 +779,7 @@ export default function Page() {
         try { video.play(); } catch (_) {}
       }
 
-      setErrorMsg("Gagal memproses: " + (err?.message || "error tidak diketahui"));
+      setErrorMsg(`${t.errorPrefix}: ` + (err?.message || t.errorUnknown));
       setStatus("previewing"); // kembali ke preview
     }
   };
@@ -779,40 +794,54 @@ export default function Page() {
     return `${baseName}${affix}.${fileExt}`;
   };
 
+  // Helper: render string template berisi placeholder {appName} menjadi JSX
+  // dengan nama app dibungkus <strong>. Contoh: "Privasi penting bagi {appName}."
+  const withAppName = (template) => {
+    const appName = "Burikin Aja";
+    const parts = template.split("{appName}");
+    return (
+      <>
+        {parts[0]}
+        <strong>{appName}</strong>
+        {parts[1]}
+      </>
+    );
+  };
+
   const renderModalContent = () => {
     switch (activeModal) {
       case "privacy":
         return (
           <>
-            <h2 style={styles.modalTitle}>Privacy Policy</h2>
-            <p style={styles.modalText}>Privasi Anda sangat penting bagi kami. Aplikasi <strong>Burikin Aja</strong> dirancang untuk memproses seluruh manipulasi video secara 100% lokal di perangkat Anda (client-side).</p>
-            <p style={styles.modalText}>Kami <strong>tidak pernah</strong> mengunggah, menyimpan, atau membagikan file video Anda ke server kami atau pihak ketiga mana pun.</p>
+            <h2 style={styles.modalTitle}>{t.modalPrivacyTitle}</h2>
+            <p style={styles.modalText}>{withAppName(t.modalPrivacyP1)}</p>
+            <p style={styles.modalText}>{t.modalPrivacyP2}</p>
           </>
         );
       case "tos":
         return (
           <>
-            <h2 style={styles.modalTitle}>Terms of Service</h2>
-            <p style={styles.modalText}>Dengan menggunakan layanan <strong>Burikin Aja</strong>, Anda setuju untuk menggunakan alat ini secara bertanggung jawab.</p>
-            <p style={styles.modalText}>Layanan ini disediakan "sebagaimana adanya" tanpa jaminan apa pun. Pengguna dilarang memproses materi ilegal atau yang melanggar hukum hak cipta.</p>
+            <h2 style={styles.modalTitle}>{t.modalTosTitle}</h2>
+            <p style={styles.modalText}>{withAppName(t.modalTosP1)}</p>
+            <p style={styles.modalText}>{t.modalTosP2}</p>
           </>
         );
       case "contact":
         return (
           <>
-            <h2 style={styles.modalTitle}>Contact Us</h2>
-            <p style={styles.modalText}>Punya pertanyaan, saran, atau menemukan bug?</p>
+            <h2 style={styles.modalTitle}>{t.modalContactTitle}</h2>
+            <p style={styles.modalText}>{t.modalContactP1}</p>
             <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{ ...styles.waLink, display: "inline-block", marginTop: 10 }}>
-              Bergabung ke Komunitas WhatsApp
+              {t.modalContactBtn}
             </a>
           </>
         );
       case "about":
         return (
           <>
-            <h2 style={styles.modalTitle}>About Us</h2>
-            <p style={styles.modalText}><strong>Burikin Aja</strong> adalah proyek independen yang dibangun oleh <strong>zals</strong>.</p>
-            <p style={styles.modalText}>Terinspirasi dari tren meme video dengan kualitas rendah, alat ini diciptakan untuk memudahkan siapa saja membuat video "shitpost" atau retro tanpa perlu software editing berat.</p>
+            <h2 style={styles.modalTitle}>{t.modalAboutTitle}</h2>
+            <p style={styles.modalText}>{withAppName(t.modalAboutP1)}</p>
+            <p style={styles.modalText}>{t.modalAboutP2}</p>
           </>
         );
       default: return null;
@@ -827,7 +856,7 @@ export default function Page() {
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
         </svg>
-        <span style={styles.sidebarBlogLabel}>BLOG</span>
+        <span style={styles.sidebarBlogLabel}>{t.blogLabel}</span>
       </a>
 
       <header style={styles.headerBar}>
@@ -837,20 +866,32 @@ export default function Page() {
               <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
-            {visitorCount !== null ? visitorCount : "--"} Total Pengunjung
+            {visitorCount !== null ? visitorCount : "--"} {t.totalVisitor}
           </span>
+          <div style={styles.langSwitcher}>
+            {LANGUAGES.map((l) => (
+              <button
+                key={l.code}
+                onClick={() => changeLang(l.code)}
+                style={{ ...styles.langBtn, ...(lang === l.code ? styles.langBtnActive : {}) }}
+                title={l.name}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
         </div>
         <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={styles.waLink}>
-          JOIN SALURAN WA
+          {t.joinWaChannel}
         </a>
       </header>
 
       <section style={styles.hero}>
         <canvas ref={heroCanvasRef} style={styles.heroNoise} />
         <div style={styles.heroInner}>
-          <div style={styles.eyebrow}>// NO SIGNAL — PROSES LOKAL DI PERANGKATMU</div>
+          <div style={styles.eyebrow}>{t.eyebrow}</div>
           <h1 style={styles.h1}>BURIKIN-AJA<span style={{ color: "var(--amber)" }}>.</span></h1>
-          <p style={styles.tagline}>Bikin video burik kaya direpost berkali-kali, atau bikin videonya gepeng absurd buat meme dengan mudah.</p>
+          <p style={styles.tagline}>{t.tagline}</p>
         </div>
       </section>
 
@@ -881,13 +922,13 @@ export default function Page() {
             <div style={styles.mediaCardLabel}>
               {fileName ? (
                 <>
-                  <span style={{ color: "var(--amber)", fontWeight: 700, fontSize: 13 }}>✓ VIDEO DIPILIH</span>
+                  <span style={{ color: "var(--amber)", fontWeight: 700, fontSize: 13 }}>{t.videoSelected}</span>
                   <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4, wordBreak: "break-all", maxWidth: 120, textAlign: "center" }}>{fileName}</span>
                 </>
               ) : (
                 <>
-                  <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 13 }}>PILIH VIDEO</span>
-                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4 }}>mp4, webm, dll</span>
+                  <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 13 }}>{t.pickVideo}</span>
+                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4 }}>{t.pickVideoHint}</span>
                 </>
               )}
             </div>
@@ -909,13 +950,13 @@ export default function Page() {
             <div style={styles.mediaCardLabel}>
               {imageName ? (
                 <>
-                  <span style={{ color: "var(--green)", fontWeight: 700, fontSize: 13 }}>✓ GAMBAR DIPILIH</span>
+                  <span style={{ color: "var(--green)", fontWeight: 700, fontSize: 13 }}>{t.imageSelected}</span>
                   <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4, wordBreak: "break-all", maxWidth: 120, textAlign: "center" }}>{imageName}</span>
                 </>
               ) : (
                 <>
-                  <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 13 }}>BURIKIN GAMBAR</span>
-                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4 }}>jpg, png, webp, dll</span>
+                  <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 13 }}>{t.burikinImage}</span>
+                  <span style={{ color: "var(--dim)", fontSize: 11, marginTop: 4 }}>{t.burikinImageHint}</span>
                 </>
               )}
             </div>
@@ -932,125 +973,128 @@ export default function Page() {
               {status === "processing" && (
                 <div style={styles.processingOverlay}>
                   <div style={styles.spinner}></div>
-                  <h3 style={{ color: "var(--amber)", margin: "10px 0 5px" }}>MEMPROSES: {progress}%</h3>
+                  <h3 style={{ color: "var(--amber)", margin: "10px 0 5px" }}>{t.processing}: {progress}%</h3>
                   <p style={{ color: "#fff", fontSize: 12, lineHeight: 1.5 }}>
-                    ⚠️ <b>PENTING:</b> Jangan pindah tab browser atau mematikan layar HP selama proses ini berjalan.
+                    {t.processingWarning}
                   </p>
                 </div>
               )}
               <canvas ref={canvasRef} style={styles.previewCanvas} />
               <canvas ref={pixelCanvasRef} style={{ display: "none" }} />
-              <div style={styles.recBadge}>{status === "processing" ? "● REC" : "● LIVE PREVIEW"}</div>
+              <div style={styles.recBadge}>{status === "processing" ? t.rec : t.livePreview}</div>
             </div>
 
             <div style={styles.presetRow}>
               {Object.keys(PRESETS).map((key) => (
                 <button key={key} onClick={() => applyPreset(key)}
                   style={{ ...styles.presetBtn, ...(presetKey === key ? styles.presetBtnActive : {}) }}>
-                  {PRESETS[key].label}
+                  {t[`preset${key.charAt(0).toUpperCase()}${key.slice(1)}`] || PRESETS[key].label}
                 </button>
               ))}
               <button style={{ ...styles.presetBtn, ...(presetKey === "custom" ? styles.presetBtnActive : {}) }}
-                onClick={() => setPresetKey("custom")}>KUSTOM</button>
+                onClick={() => setPresetKey("custom")}>{t.presetCustom}</button>
             </div>
 
             <div style={styles.settingsGrid}>
               <div style={styles.setSectionGroup}>
-                <div style={styles.setSectionTitle}>🛠️ VISUAL & AUDIO</div>
+                <div style={styles.setSectionTitle}>{t.sectionVisualAudio}</div>
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Resolusi Output</span>
+                  <span style={styles.setTitle}>{t.outputResolution}</span>
                   <select style={styles.setSelect} value={resHeight} onChange={(e) => setResHeight(Number(e.target.value))}>
-                    <option value={144}>140p / 144p (Sangat Buram)</option>
-                    <option value={240}>240p (Buram)</option>
-                    <option value={360}>360p (Standar)</option>
-                    <option value={480}>480p (Lumayan)</option>
-                    <option value={0}>Sesuai Ukuran Asli</option>
+                    <option value={144}>{t.res144}</option>
+                    <option value={240}>{t.res240}</option>
+                    <option value={360}>{t.res360}</option>
+                    <option value={480}>{t.res480}</option>
+                    <option value={0}>{t.resOriginal}</option>
                   </select>
                 </label>
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Frame Rate (FPS)</span>
+                  <span style={styles.setTitle}>{t.frameRate}</span>
                   <select style={styles.setSelect} value={fpsTarget} onChange={(e) => setFpsTarget(Number(e.target.value))}>
-                    <option value={8}>8 FPS (Sangat Patah-patah)</option>
-                    <option value={12}>12 FPS (Patah-patah)</option>
-                    <option value={15}>15 FPS (Kurang Lancar)</option>
-                    <option value={24}>24 FPS (Normal Film)</option>
-                    <option value={30}>30 FPS (Lancar)</option>
+                    <option value={8}>{t.fps8}</option>
+                    <option value={12}>{t.fps12}</option>
+                    <option value={15}>{t.fps15}</option>
+                    <option value={24}>{t.fps24}</option>
+                    <option value={30}>{t.fps30}</option>
                   </select>
                 </label>
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Kompresi Video (Bitrate)</span>
+                  <span style={styles.setTitle}>{t.videoCompression}</span>
                   <select style={styles.setSelect} value={videoQuality} onChange={(e) => setVideoQuality(Number(e.target.value))}>
-                    <option value={1}>Parah (Artefak Kompresi)</option>
-                    <option value={2}>Sedang (Sedikit Artefak)</option>
-                    <option value={3}>Bagus (Normal)</option>
-                    <option value={4}>Sangat Bagus (Jernih)</option>
+                    <option value={1}>{t.vq1}</option>
+                    <option value={2}>{t.vq2}</option>
+                    <option value={3}>{t.vq3}</option>
+                    <option value={4}>{t.vq4}</option>
                   </select>
                 </label>
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Kualitas Suara (Audio)</span>
+                  <span style={styles.setTitle}>{t.audioQualityLabel}</span>
                   <select style={styles.setSelect} value={audioQuality} onChange={(e) => setAudioQuality(Number(e.target.value))}>
-                    <option value={1}>Hancur (Pecah & Kresek)</option>
-                    <option value={2}>Mendem (Kaya HP Jadul)</option>
-                    <option value={3}>Biasa (Sedikit Teredam)</option>
-                    <option value={4}>Normal (Jernih Asli)</option>
+                    <option value={1}>{t.aq1}</option>
+                    <option value={2}>{t.aq2}</option>
+                    <option value={3}>{t.aq3}</option>
+                    <option value={4}>{t.aq4}</option>
                   </select>
                 </label>
               </div>
 
               {/* EFEK AUDIO SPESIAL */}
               <div style={{ gridColumn: "1 / -1" }}>
-                <div style={styles.setSectionTitle}>🎙️ EFEK AUDIO SPESIAL</div>
+                <div style={styles.setSectionTitle}>{t.sectionAudioEffects}</div>
                 <div style={styles.audioEffectGrid}>
                   {[
-                    { key: "none", emoji: "🔇", label: "NORMAL", desc: "Asli" },
-                    { key: "tupai", emoji: "🐿️", label: "TUPAI", desc: "Suara chipmunk" },
-                    { key: "setan", emoji: "😈", label: "SETAN", desc: "Bass gelap" },
-                    { key: "bass", emoji: "💥", label: "BASS", desc: "Sub bass pecah" },
-                    { key: "megaphone", emoji: "📣", label: "MEGAPHONE", desc: "Pengeras jalan" },
-                    { key: "cave", emoji: "🏔️", label: "GUA", desc: "Echo & reverb" },
-                    { key: "robot", emoji: "🤖", label: "ROBOT", desc: "Ring modulator" },
-                    { key: "vhs", emoji: "📼", label: "VHS", desc: "Kaset lawas" },
-                    { key: "telephone", emoji: "☎️", label: "TELEPON", desc: "Jaringan 2G" },
-                  ].map(({ key, emoji, label, desc }) => (
-                    <button key={key} onClick={() => setAudioEffect(key)}
-                      style={{ ...styles.audioEffectBtn, ...(audioEffect === key ? styles.audioEffectBtnActive : {}) }}>
-                      <span style={styles.audioEffectEmoji}>{emoji}</span>
-                      <span style={styles.audioEffectLabel}>{label}</span>
-                      <span style={styles.audioEffectDesc}>{desc}</span>
-                    </button>
-                  ))}
+                    { key: "none", emoji: "🔇" },
+                    { key: "tupai", emoji: "🐿️" },
+                    { key: "setan", emoji: "😈" },
+                    { key: "bass", emoji: "💥" },
+                    { key: "megaphone", emoji: "📣" },
+                    { key: "cave", emoji: "🏔️" },
+                    { key: "robot", emoji: "🤖" },
+                    { key: "vhs", emoji: "📼" },
+                    { key: "telephone", emoji: "☎️" },
+                  ].map(({ key, emoji }) => {
+                    const capKey = key.charAt(0).toUpperCase() + key.slice(1);
+                    return (
+                      <button key={key} onClick={() => setAudioEffect(key)}
+                        style={{ ...styles.audioEffectBtn, ...(audioEffect === key ? styles.audioEffectBtnActive : {}) }}>
+                        <span style={styles.audioEffectEmoji}>{emoji}</span>
+                        <span style={styles.audioEffectLabel}>{t[`eff${capKey}Label`]}</span>
+                        <span style={styles.audioEffectDesc}>{t[`eff${capKey}Desc`]}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               <div style={styles.setSectionGroup}>
-                <div style={styles.setSectionTitle}>👽 EFEK ABSURD</div>
+                <div style={styles.setSectionTitle}>{t.sectionAbsurdEffects}</div>
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Filter Warna</span>
+                  <span style={styles.setTitle}>{t.colorFilterLabel}</span>
                   <select style={styles.setSelect} value={colorFilter} onChange={(e) => setColorFilter(Number(e.target.value))}>
-                    <option value={0}>Normal (Asli)</option>
-                    <option value={1}>Majapahit (Hitam Putih)</option>
-                    <option value={2}>Vintage (Sepia Usang)</option>
-                    <option value={3}>Deep Fried (Ngejreng Parah)</option>
+                    <option value={0}>{t.cf0}</option>
+                    <option value={1}>{t.cf1}</option>
+                    <option value={2}>{t.cf2}</option>
+                    <option value={3}>{t.cf3}</option>
                   </select>
                 </label>
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Kotak-Kotak (Pixel)</span>
+                  <span style={styles.setTitle}>{t.pixelScaleLabel}</span>
                   <select style={styles.setSelect} value={pixelScale} onChange={(e) => setPixelScale(Number(e.target.value))}>
-                    <option value={1}>Mulus (Asli)</option>
-                    <option value={2}>Kotak Halus</option>
-                    <option value={4}>Kotak Sedang</option>
-                    <option value={8}>Kotak Besar (Retro 8-bit)</option>
-                    <option value={16}>Kotak Raksasa (Minecraft)</option>
+                    <option value={1}>{t.px1}</option>
+                    <option value={2}>{t.px2}</option>
+                    <option value={4}>{t.px4}</option>
+                    <option value={8}>{t.px8}</option>
+                    <option value={16}>{t.px16}</option>
                   </select>
                 </label>
                 <label style={styles.setLabel}>
-                  <span style={styles.setTitle}>Rasio Video (Gepengin)</span>
+                  <span style={styles.setTitle}>{t.stretchLabel}</span>
                   <select style={styles.setSelect} value={stretchFactor} onChange={(e) => setStretchFactor(Number(e.target.value))}>
-                    <option value={0.5}>Kurus Kering (Tinggi)</option>
-                    <option value={1}>Normal (Sesuai Asli)</option>
-                    <option value={1.5}>Lumayan Lebar</option>
-                    <option value={2}>Gepeng (Wide)</option>
-                    <option value={3}>Super Gepeng Parah</option>
+                    <option value={0.5}>{t.stretch05}</option>
+                    <option value={1}>{t.stretch1}</option>
+                    <option value={1.5}>{t.stretch15}</option>
+                    <option value={2}>{t.stretch2}</option>
+                    <option value={3}>{t.stretch3}</option>
                   </select>
                 </label>
               </div>
@@ -1061,7 +1105,7 @@ export default function Page() {
               disabled={!ready || status === "processing"}
               onClick={handleProcess}
             >
-              {status === "processing" ? `MEMPROSES... ${progress}%` : `BIKININ & DOWNLOAD`}
+              {status === "processing" ? `${t.processBtnProcessing}... ${progress}%` : t.processBtnIdle}
             </button>
 
             {errorMsg && <p style={styles.error}>{errorMsg}</p>}
@@ -1071,7 +1115,7 @@ export default function Page() {
                 <div style={styles.resultBox}>
                   <video src={outputURL} controls style={styles.resultVideo} />
                   <a href={outputURL} download={getOutputFilename()} style={styles.downloadLink}>
-                    ⬇ DOWNLOAD HASIL (.{fileExt})
+                    {t.downloadResult} (.{fileExt})
                   </a>
                 </div>
                 <AdBanner slotId="9626464764" />
@@ -1085,8 +1129,8 @@ export default function Page() {
         {imageURL && (
           <div style={styles.imageBurikSection}>
             <div style={styles.imageBurikHeader}>
-              <span style={styles.imageBurikTitle}>🖼️ BURIKIN GAMBAR</span>
-              <span style={styles.imageBurikBadge}>● LIVE PREVIEW</span>
+              <span style={styles.imageBurikTitle}>{t.imageSectionTitle}</span>
+              <span style={styles.imageBurikBadge}>{t.livePreview}</span>
             </div>
             <div style={styles.imageBurikBody}>
               <div style={styles.imageBurikPreviewWrap}>
@@ -1095,8 +1139,8 @@ export default function Page() {
               <div style={styles.imageBurikControls}>
                 <div style={styles.sliderGroup}>
                   <div style={styles.sliderLabelRow}>
-                    <span style={styles.setTitle}>TINGKAT BURIK</span>
-                    <span style={styles.sliderValue}>{imagePixel === 1 ? "JERNIH" : imagePixel <= 4 ? "DIKIT" : imagePixel <= 8 ? "LUMAYAN" : imagePixel <= 16 ? "PARAH" : imagePixel <= 32 ? "8-BIT" : "MINECRAFT"}</span>
+                    <span style={styles.setTitle}>{t.burikLevel}</span>
+                    <span style={styles.sliderValue}>{imagePixel === 1 ? t.burikLevelClear : imagePixel <= 4 ? t.burikLevelLittle : imagePixel <= 8 ? t.burikLevelEnough : imagePixel <= 16 ? t.burikLevelSevere : imagePixel <= 32 ? t.burikLevel8bit : t.burikLevelMinecraft}</span>
                   </div>
                   <input type="range" min={0} max={5} step={1}
                     value={[1, 4, 8, 16, 32, 64].indexOf(imagePixel) === -1 ? 0 : [1, 4, 8, 16, 32, 64].indexOf(imagePixel)}
@@ -1108,15 +1152,15 @@ export default function Page() {
                 </div>
                 <div style={{ borderTop: "1px dashed var(--line)", margin: "14px 0" }} />
                 <div style={styles.setLabel}>
-                  <span style={styles.setTitle}>FILTER WARNA</span>
+                  <span style={styles.setTitle}>{t.colorFilterTitle}</span>
                   <div style={styles.filterBtnRow}>
-                    {[{ val: 0, label: "NORMAL" }, { val: 1, label: "B&W" }, { val: 2, label: "SEPIA" }, { val: 3, label: "FRIED" }].map(({ val, label }) => (
+                    {[{ val: 0, label: t.filterNormal }, { val: 1, label: t.filterBW }, { val: 2, label: t.filterSepia }, { val: 3, label: t.filterFried }].map(({ val, label }) => (
                       <button key={val} onClick={() => setImageFilter(val)}
                         style={{ ...styles.filterBtn, ...(imageFilter === val ? styles.filterBtnActive : {}) }}>{label}</button>
                     ))}
                   </div>
                 </div>
-                <button style={styles.imageDlBtn} onClick={downloadBurikImage}>⬇ DOWNLOAD</button>
+                <button style={styles.imageDlBtn} onClick={downloadBurikImage}>{t.downloadImage}</button>
               </div>
             </div>
           </div>
@@ -1125,50 +1169,50 @@ export default function Page() {
 
       <section style={styles.seoArticle}>
         <div style={styles.seoContent}>
-          <h2 style={styles.seoH2}>Tentang Burikin Aja</h2>
-          <p style={styles.seoP}><strong>Burikin Aja</strong> adalah sebuah web app gratis untuk mengedit dan menurunkan kualitas video secara sengaja. Ingin membuat video terlihat seperti direkam menggunakan HP jadul, hasil kiriman WhatsApp yang di-forward berkali-kali, atau membuat meme absurd dengan rasio layar gepeng?</p>
-          <p style={styles.seoP}>Aplikasi ini berjalan <strong>100% secara lokal di browser (client-side)</strong>. Kami tidak pernah mengunggah, menyimpan, atau menyebarkan video Anda ke server mana pun.</p>
-          <h3 style={styles.seoH3}>Fitur Utama & Kustomisasi</h3>
+          <h2 style={styles.seoH2}>{t.seoTitle}</h2>
+          <p style={styles.seoP}><strong>Burikin Aja</strong> {t.seoP1}</p>
+          <p style={styles.seoP}>{t.seoP2}</p>
+          <h3 style={styles.seoH3}>{t.seoFeaturesTitle}</h3>
           <ul style={styles.seoUl}>
-            <li style={styles.seoLi}><strong>Turunkan Resolusi & Bitrate:</strong> Paksa video resolusi tinggi menjadi buram, patah-patah, dan penuh kotak pixel art.</li>
-            <li style={styles.seoLi}><strong>Efek Audio Rusak:</strong> Buat suara video terdengar "mendem", pecah, atau seperti kualitas rekaman kaset rusak.</li>
-            <li style={styles.seoLi}><strong>Gepengin Video:</strong> Ubah bentuk video normal menjadi super lebar atau sangat kurus memanjang.</li>
-            <li style={styles.seoLi}><strong>Filter Visual:</strong> Terapkan filter grayscale ekstrem atau Deep Fried yang mencolok.</li>
+            <li style={styles.seoLi}>{t.seoFeature1}</li>
+            <li style={styles.seoLi}>{t.seoFeature2}</li>
+            <li style={styles.seoLi}>{t.seoFeature3}</li>
+            <li style={styles.seoLi}>{t.seoFeature4}</li>
           </ul>
-          <h3 style={styles.seoH3}>Cara Penggunaan</h3>
+          <h3 style={styles.seoH3}>{t.seoHowToTitle}</h3>
           <ol style={styles.seoOl}>
-            <li style={styles.seoLi}>Klik tombol <strong>PILIH VIDEO</strong> dan masukkan video dari galeri HP atau komputer Anda.</li>
-            <li style={styles.seoLi}>Perhatikan <strong>Live Preview</strong> untuk melihat efek secara langsung.</li>
-            <li style={styles.seoLi}>Pilih Preset atau atur sendiri parameter sesuka hati.</li>
-            <li style={styles.seoLi}>Klik <strong>BIKININ & DOWNLOAD</strong>. Tetap berada di halaman ini selama proses berjalan.</li>
+            <li style={styles.seoLi}>{t.seoStep1}</li>
+            <li style={styles.seoLi}>{t.seoStep2}</li>
+            <li style={styles.seoLi}>{t.seoStep3}</li>
+            <li style={styles.seoLi}>{t.seoStep4}</li>
           </ol>
-          <h3 style={styles.seoH3}>Pertanyaan Umum (FAQ)</h3>
+          <h3 style={styles.seoH3}>{t.seoFaqTitle}</h3>
           <div style={styles.faqBox}>
-            <p style={styles.seoP}><strong>T: Mengapa durasi video hasil download saya hanya 1 detik?</strong><br />
-              J: Ini sudah diperbaiki di versi terbaru! Sebelumnya masalah ini terjadi karena browser menghentikan perekaman saat tab berpindah. Sekarang sistem menggunakan <em>setInterval</em> untuk menggambar frame (bukan requestAnimationFrame) sehingga tetap berjalan meski tab di-minimize.</p>
-            <p style={styles.seoP}><strong>T: Apakah layanan ini gratis? Apakah ada batas durasi?</strong><br />
-              J: Sepenuhnya gratis! Disarankan memproses video di bawah 3 menit karena proses encoding mengandalkan CPU/GPU perangkat Anda.</p>
+            <p style={styles.seoP}><strong>{t.seoFaqQ1}</strong><br />
+              {t.seoFaqA1}</p>
+            <p style={styles.seoP}><strong>{t.seoFaqQ2}</strong><br />
+              {t.seoFaqA2}</p>
           </div>
         </div>
       </section>
 
       <footer style={styles.footer}>
         <div style={styles.footerNav}>
-          <a href="/privacy" style={styles.footerLink}>Privacy Policy</a>
+          <a href="/privacy" style={styles.footerLink}>{t.footerPrivacy}</a>
           <span style={styles.footerDot}>•</span>
-          <a href="/tos" style={styles.footerLink}>Terms of Service</a>
+          <a href="/tos" style={styles.footerLink}>{t.footerTos}</a>
           <span style={styles.footerDot}>•</span>
-          <a href="/contact" style={styles.footerLink}>Contact Us</a>
+          <a href="/contact" style={styles.footerLink}>{t.footerContact}</a>
           <span style={styles.footerDot}>•</span>
-          <a href="/about" style={styles.footerLink}>About</a>
+          <a href="/about" style={styles.footerLink}>{t.footerAbout}</a>
           <span style={styles.footerDot}>•</span>
-          <a href="/blog" style={styles.footerLink}>Blog</a>
+          <a href="/blog" style={styles.footerLink}>{t.footerBlog}</a>
         </div>
         <p style={{ marginTop: 16 }}>
-          Dibuat oleh <strong>zals</strong> — Diproses 100% di perangkatmu, tanpa server. <br />
-          <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{ color: "var(--amber)", textDecoration: "none" }}>Gabung Saluran WhatsApp</a>
+          {t.footerMadeBy} <strong>zals</strong> {t.footerProcessedLocally} <br />
+          <a href="https://whatsapp.com/channel/0029VaYuIQT2v1IjZmqTNG3x" target="_blank" rel="noopener noreferrer" style={{ color: "var(--amber)", textDecoration: "none" }}>{t.footerJoinWa}</a>
         </p>
-        <p style={{ marginTop: 8, fontSize: 10, color: "var(--dim)", opacity: 0.7 }}>© {new Date().getFullYear()} Burikin Aja. All rights reserved.</p>
+        <p style={{ marginTop: 8, fontSize: 10, color: "var(--dim)", opacity: 0.7 }}>© {new Date().getFullYear()} Burikin Aja. {t.footerCopyright}</p>
       </footer>
 
       {activeModal && (
@@ -1214,8 +1258,11 @@ const styles = {
   audioEffectEmoji: { fontSize: 22, lineHeight: 1 },
   audioEffectLabel: { fontFamily: "var(--mono-display)", fontSize: 10, fontWeight: 700, color: "var(--amber)", letterSpacing: "0.06em" },
   audioEffectDesc: { fontSize: 10, color: "var(--dim)", textAlign: "center", lineHeight: 1.3 },
-  headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)" },
-  credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)" },
+  headerBar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px dashed var(--line)", flexWrap: "wrap", gap: 10 },
+  credits: { display: "flex", alignItems: "center", gap: "12px", fontSize: 13, color: "var(--dim)", flexWrap: "wrap" },
+  langSwitcher: { display: "flex", gap: 4, border: "1px solid var(--line)", borderRadius: 4, padding: 2, background: "var(--panel)" },
+  langBtn: { background: "transparent", border: "none", color: "var(--dim)", fontFamily: "var(--mono-display)", fontSize: 11, fontWeight: 700, padding: "4px 8px", cursor: "pointer", borderRadius: 3, letterSpacing: "0.04em" },
+  langBtnActive: { background: "var(--amber)", color: "#000" },
   visitorBadge: { display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--panel)", border: "1px solid var(--line)", padding: "6px 10px", borderRadius: "4px", fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono-display)" },
   waLink: { background: "var(--amber)", color: "#000", textDecoration: "none", padding: "6px 12px", fontSize: 11, fontWeight: "bold", borderRadius: 4 },
   hero: { position: "relative", padding: "40px 0 28px", overflow: "hidden", borderBottom: "1px solid var(--line)" },
