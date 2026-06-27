@@ -31,6 +31,25 @@ export default function RootLayout({ children }) {
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6307870813026612"
           crossOrigin="anonymous"
         ></script>
+
+        {/* Register Service Worker Monetag */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js')
+                    .then(function(registration) {
+                      console.log('SW Monetag registered:', registration.scope);
+                    })
+                    .catch(function(error) {
+                      console.log('SW Monetag registration failed:', error);
+                    });
+                });
+              }
+            `,
+          }}
+        ></script>
       </head>
       <body>{children}</body>
     </html>
