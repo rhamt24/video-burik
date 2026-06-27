@@ -19,6 +19,9 @@ export default function RootLayout({ children }) {
       <head>
         {/* Meta Google Site Verification Baru */}
         <meta name="google-site-verification" content="2LXfski1y6RJdglQv40n7jsKu3Ww5wWj5sANTHm-pAI" />
+
+        {/* Meta Monetag Verification */}
+        <meta name="monetag" content="00151d67ee72043ef4ef8676be634839" />
         
         <link
           href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Space+Mono:wght@400;700&display=swap"
@@ -30,25 +33,6 @@ export default function RootLayout({ children }) {
           async 
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6307870813026612"
           crossOrigin="anonymous"
-        ></script>
-
-        {/* Register Service Worker Monetag */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js')
-                    .then(function(registration) {
-                      console.log('SW Monetag registered:', registration.scope);
-                    })
-                    .catch(function(error) {
-                      console.log('SW Monetag registration failed:', error);
-                    });
-                });
-              }
-            `,
-          }}
         ></script>
       </head>
       <body>{children}</body>
