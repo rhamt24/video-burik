@@ -27,10 +27,19 @@ function makeDistortionCurve(amount) {
 // Helper: render watermark di pojok kanan bawah canvas.
 // Dipanggil SETELAH ctx.filter di-reset ke "none", sehingga teks ini
 // tidak ikut terkena blur/pixelated/color filter dari efek burik.
-function drawWatermark(ctx, w, h) {
+//
+// PENTING (FIX): fontSize & margin dihitung dari `refW` (lebar VIDEO ASLI),
+// bukan dari `w` (lebar canvas output). Canvas output di preset PARAH/
+// MAJAPAHIT bisa cuma 144p lebar, jadi kalau basisnya `w`, watermark jadi
+// kelihatan jauh LEBIH BESAR secara relatif dibanding di preset RINGAN
+// (yang canvasnya 360p+). Dengan basis refW (video.videoWidth, yang selalu
+// sama untuk video yang sama, terlepas dari preset apapun yang dipilih),
+// ukuran watermark jadi konsisten di semua preset.
+function drawWatermark(ctx, w, h, refW) {
   const text = "burikinaja.web.id";
-  const margin = Math.max(6, Math.round(w * 0.018));
-  const fontSize = Math.max(10, Math.round(w * 0.028));
+  const baseW = refW || w; // fallback ke w kalau refW gak tersedia
+  const margin = Math.max(6, Math.round(baseW * 0.018));
+  const fontSize = Math.max(10, Math.round(baseW * 0.028));
   ctx.save();
   ctx.font = `700 ${fontSize}px monospace`;
   ctx.textBaseline = "bottom";
@@ -78,7 +87,6 @@ function AdBanner({ slotId }) {
 }
 
 // EffectiveCPM — native/invoke banner (container style)
-// Muat script invoke.js + render container div
 function AdEffectiveCPMNative() {
   useScript(
     "https://pl30087445.effectivecpmnetwork.com/4357f30a7ce316369e54e9b449b4699b/invoke.js",
@@ -95,7 +103,7 @@ function AdEffectiveCPMNative() {
 // EffectiveCPM — direct JS banner (pl30087444)
 function AdEffectiveCPMDirect() {
   useScript("https://pl30087444.effectivecpmnetwork.com/07/a3/3f/07a33fee4a04d3d83f52cbd6617bb55a.js");
-  return null; // script self-renders
+  return null;
 }
 
 // HighPerformanceFormat — iframe banner 468x60
@@ -125,10 +133,10 @@ function AdHighPerformance() {
 // EffectiveCPM — popunder/onclick (pl30087448)
 function AdEffectiveCPMPopunder() {
   useScript("https://pl30087448.effectivecpmnetwork.com/db/6b/21/db6b216e120ac6cfff8fd67c8cf8ba43.js");
-  return null; // script-only, tidak perlu elemen
+  return null;
 }
 
-// EffectiveCPM — direct link tracker (dipanggil sekali di level page)
+// EffectiveCPM — direct link tracker
 function useEffectiveCPMTracker() {
   useEffect(() => {
     if (window._ecpmTracked) return;
@@ -154,7 +162,8 @@ export default function Page() {
   const rafRef = useRef(null);
   const drawIntervalRef = useRef(null);
   const isCancelledRef = useRef(false);
-  const recordStartRef = useRef(0); // waktu mulai recording (performance.now), untuk fix durasi webm
+  const recordStartRef = useRef(0); // waktu mulai recording (performance.now), fallback only
+  const lastDataAvailableRef = useRef(0); // FIX: timestamp data terakhir masuk, buat watchdog "stall"
 
   // States dasar
   const [fileName, setFileName] = useState("");
@@ -194,7 +203,7 @@ export default function Page() {
   const [pixelScale, setPixelScale] = useState(1);
   const [stretchFactor, setStretchFactor] = useState(1);
   const [colorFilter, setColorFilter] = useState(0);
-  const [watermarkEnabled, setWatermarkEnabled] = useState(true); // default ON
+  const [watermarkEnabled, setWatermarkEnabled] = useState(true);
 
   // States untuk Burikin Gambar
   const [imageURL, setImageURL] = useState(null);
@@ -202,10 +211,8 @@ export default function Page() {
   const [imagePixel, setImagePixel] = useState(8);
   const [imageFilter, setImageFilter] = useState(0);
 
-  // Aktifkan tracker link EffectiveCPM sekali saat page load
   useEffectiveCPMTracker();
 
-  // Simpan setting saat ini ke ref agar bisa dibaca di dalam handler async tanpa stale closure
   const settingRef = useRef({});
   useEffect(() => {
     settingRef.current = { resHeight, fpsTarget, videoQuality, audioQuality, audioEffect, pixelScale, stretchFactor, colorFilter, watermarkEnabled };
@@ -256,7 +263,6 @@ export default function Page() {
     }
   }, [resHeight, fpsTarget, videoQuality, audioQuality, pixelScale, stretchFactor, colorFilter, presetKey]);
 
-  // Update canvas size saat setting berubah (hanya di luar proses)
   useEffect(() => {
     if (status === "processing") return;
     const video = videoRef.current;
@@ -294,7 +300,6 @@ export default function Page() {
   const onPickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    // Batalkan proses yang sedang berjalan jika ada
     isCancelledRef.current = true;
     setOutputURL(null);
     setStatus("idle");
@@ -396,10 +401,11 @@ export default function Page() {
     }
     ctx.filter = "none";
 
-    // Watermark digambar SETELAH filter direset, jadi selalu tajam
-    // tidak terpengaruh blur/pixelated/grain/color filter apapun.
+    // FIX: basis ukuran watermark dari video.videoWidth (lebar video ASLI),
+    // bukan canvas.width. Supaya watermark gak kelihatan jadi gede sendiri
+    // saat preset PARAH/MAJAPAHIT yang canvasnya kecil (144p).
     if (settings.watermarkEnabled) {
-      drawWatermark(ctx, canvas.width, canvas.height);
+      drawWatermark(ctx, canvas.width, canvas.height, video.videoWidth);
     }
   }, []);
 
@@ -437,10 +443,8 @@ export default function Page() {
     const pCanvas = pixelCanvasRef.current;
     if (!video || !canvas || !pCanvas) return;
 
-    // Hentikan preview RAF
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
 
-    // Freeze setting saat proses dimulai
     const settings = { ...settingRef.current };
 
     isCancelledRef.current = false;
@@ -453,18 +457,18 @@ export default function Page() {
     let recorder = null;
     let audioCtx = null;
     let drawTimer = null;
+    let stallWatchdogId = null; // FIX: watchdog khusus deteksi video "macet diam"
 
     try {
       // ── 1. Reset video ke awal ──────────────────────────────────────────
       video.pause();
       video.loop = false;
-      video.muted = true; // Harus muted agar captureStream tidak konflik AudioContext
+      video.muted = true; // Harus muted dulu agar captureStream test tidak konflik
 
       await new Promise((resolve) => {
         const onSeeked = () => { video.removeEventListener("seeked", onSeeked); resolve(); };
         video.addEventListener("seeked", onSeeked);
         video.currentTime = 0;
-        // Fallback timeout untuk seek
         setTimeout(resolve, 1000);
       });
 
@@ -475,15 +479,14 @@ export default function Page() {
       drawFrameToCanvas(video, canvas, pCanvas, settings);
 
       // ── 3. Buat stream dari canvas ──────────────────────────────────────
-      // Gunakan fpsTarget sebagai frame rate canvas stream
       const canvasStream = canvas.captureStream(settings.fpsTarget);
 
       // ── 4. Setup audio via AudioContext ─────────────────────────────────
-      // Sumber audio dari element video, BUKAN dari captureStream audio track
-      // karena captureStream audio sering lost saat video di-seek / play ulang
+      // Sumber audio dari element video (MediaElementSourceNode), BUKAN dari
+      // captureStream audio track, karena captureStream audio sering lost
+      // saat video di-seek / play ulang.
       let finalAudioTracks = [];
 
-      // Cek apakah video punya audio dengan mencoba captureStream
       const testStream = video.captureStream ? video.captureStream() : null;
       const hasAudio = testStream && testStream.getAudioTracks().length > 0;
 
@@ -492,13 +495,8 @@ export default function Page() {
         audioCtx = new AudioCtx({ sampleRate: 44100 });
         audioCtxRef.current = audioCtx;
 
-        // Gunakan MediaElementSourceNode — lebih stable dari captureStream audio
         const source = audioCtx.createMediaElementSource(video);
 
-        // Agar video masih bisa didengar selama proses (opsional)
-        // source.connect(audioCtx.destination); // nonaktifkan agar tidak double audio
-
-        // ── 4a. Filter degradasi dasar ────────────────────────────────────
         const lowpass = audioCtx.createBiquadFilter();
         lowpass.type = "lowpass";
         let cutoff = 20000;
@@ -519,7 +517,6 @@ export default function Page() {
           lastNode = distortion;
         }
 
-        // ── 4b. Efek Audio Spesial ────────────────────────────────────────
         const effect = settings.audioEffect;
 
         if (effect === "tupai") {
@@ -673,36 +670,63 @@ export default function Page() {
       });
       recorderRef.current = recorder;
 
+      // FIX: track timestamp data terakhir masuk + total bytes, supaya kita
+      // bisa tahu kalau MediaRecorder tiba-tiba berhenti ngirim data padahal
+      // video masih jalan (penyebab paling umum dari "24s jadi cuma 4s" —
+      // recorder stuck/stalled di tengah jalan tapi loop nunggu 'ended' tetap
+      // jalan terus sampai akhir, sehingga proses kelihatan "selesai normal"
+      // padahal chunks yang terekam cuma sebagian).
+      let totalBytesRecorded = 0;
+      lastDataAvailableRef.current = performance.now();
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) {
+          chunksRef.current.push(e.data);
+          totalBytesRecorded += e.data.size;
+          lastDataAvailableRef.current = performance.now();
+        }
+      };
+
+      recorder.onerror = (e) => {
+        console.error("[Burikin] MediaRecorder error:", e.error || e);
       };
 
       // ── 6. Mulai recording & draw loop ──────────────────────────────────
-      // KRITIS: recorder.start() TANPA argumen = timeslice besar = lebih reliable.
-      // Kita request data setiap 1 detik agar tidak kehilangan data saat video panjang.
-      // Catat waktu mulai recording secara presisi untuk fix metadata durasi nanti.
+      // Timeslice 1000ms = recorder diminta flush data per 1 detik, supaya
+      // gak nunggu sampai akhir buat dapet data (lebih aman dari kehilangan
+      // data kalau ada crash di tengah).
       recordStartRef.current = performance.now();
       recorder.start(1000);
 
-      // ── 7. Draw loop via setInterval (tidak bergantung pada rAF visibility) ──
-      // setInterval tidak di-throttle oleh browser saat tab background (berbeda dengan rAF)
-      const frameInterval = Math.max(1000 / settings.fpsTarget, 33); // min 33ms = max ~30fps
+      // ── 7. Draw loop via setInterval (tidak di-throttle saat tab background) ──
+      const frameInterval = Math.max(1000 / settings.fpsTarget, 33);
       drawTimer = setInterval(() => {
         if (isCancelledRef.current) return;
         drawFrameToCanvas(video, canvas, pCanvas, settings);
       }, frameInterval);
 
       // ── 8. Play video & tunggu selesai ──────────────────────────────────
-      // KRITIS: unmute video agar MediaElementSource bisa mengambil audio
       video.muted = false;
       video.volume = 1.0;
 
       await video.play();
 
-      const videoDuration = video.duration;
+      const videoDuration = video.duration; // durasi ASLI video — dipakai sebagai patokan akhir
 
-      // Tunggu video selesai dengan cara paling robust:
-      // Polling currentTime via Promise, dengan multiple fallback
+      // FIX: watchdog "stall" terpisah dari watchdog total durasi. Kalau
+      // MediaRecorder berhenti menerima data selama >5 detik PADAHAL video
+      // masih berjalan (video.paused === false, video belum ended), berarti
+      // ada sesuatu yang macet (browser throttle, AudioContext drop, dll).
+      // Kita coba "bangunkan" recorder dengan requestData() supaya gak diam
+      // total dan kehilangan sisa rekaman.
+      stallWatchdogId = setInterval(() => {
+        if (isCancelledRef.current || !recorder || recorder.state !== "recording") return;
+        const sinceLastData = performance.now() - lastDataAvailableRef.current;
+        if (sinceLastData > 5000 && !video.paused && !video.ended) {
+          console.warn("[Burikin] Recorder stall terdeteksi, requestData() dipaksa.");
+          try { recorder.requestData(); } catch (_) {}
+        }
+      }, 2000);
+
       await new Promise((resolve) => {
         let resolved = false;
 
@@ -717,102 +741,119 @@ export default function Page() {
           resolve();
         };
 
-        // Event listener utama
         const onEnded = () => finish("ended event");
         video.addEventListener("ended", onEnded);
 
-        // Fallback 1: jika video di-pause di akhir (beberapa browser)
         const onPause = () => {
           const remaining = videoDuration - video.currentTime;
           if (remaining < 0.5) finish("pause near end");
         };
         video.addEventListener("pause", onPause);
 
-        // Fallback 2: polling currentTime — ini yang paling robust untuk semua skenario
+        // Polling currentTime — paling robust untuk semua skenario browser.
         const pollingId = setInterval(() => {
           if (isCancelledRef.current) { finish("cancelled"); return; }
           if (!video.paused && !video.ended) {
-            // Update progress bar
             if (videoDuration > 0) {
               const pct = Math.min(99, Math.round((video.currentTime / videoDuration) * 100));
               setProgress(pct);
             }
           }
-          // Cek apakah sudah di akhir
           if (video.ended || (videoDuration > 0 && video.currentTime >= videoDuration - 0.2)) {
             finish("polling reached end");
           }
-        }, 250); // poll setiap 250ms — presisi cukup, tidak boros CPU
+        }, 250);
 
-        // Fallback 3: watchdog timer = durasi video + buffer 15 detik
+        // Watchdog total = durasi video + buffer 15 detik. Ini batas darurat
+        // KALAU video benar-benar macet total (bukan stall recorder).
         const watchdogMs = (isFinite(videoDuration) && videoDuration > 0)
           ? (videoDuration * 1000 + 15000)
-          : 10 * 60 * 1000; // 10 menit jika durasi tidak diketahui
+          : 10 * 60 * 1000;
         const watchdogId = setTimeout(() => finish("watchdog timeout"), watchdogMs);
       });
 
       // ── 9. Selesai, stop semua ──────────────────────────────────────────
       clearInterval(drawTimer); drawTimer = null;
+      if (stallWatchdogId) { clearInterval(stallWatchdogId); stallWatchdogId = null; }
 
-      // Draw frame terakhir untuk memastikan recorder dapat frame
+      // Draw frame terakhir untuk memastikan recorder dapat frame penutup
       drawFrameToCanvas(video, canvas, pCanvas, settings);
 
-      // Minta data terakhir sebelum stop
+      // FIX: requestData() + tunggu lebih lama (500ms, bukan 200ms) sebelum
+      // stop(), supaya chunk terakhir (terutama audio yang sering lebih
+      // lambat flush daripada video) benar-benar masuk ke chunksRef sebelum
+      // recorder ditutup. 200ms kadang gak cukup di device yang lebih lambat
+      // atau saat browser sedang sibuk → inilah salah satu sumber audio
+      // "hilang" di detik-detik akhir / video kepotong duluan.
       if (recorder.state === "recording") {
         recorder.requestData();
-        await new Promise(r => setTimeout(r, 200)); // beri waktu data masuk
+        await new Promise(r => setTimeout(r, 500));
       }
 
       const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
       if (recorder.state !== "inactive") recorder.stop();
       await stopped;
 
-      // Tutup AudioContext
       if (audioCtx && audioCtx.state !== "closed") {
         await audioCtx.close();
         audioCtxRef.current = null;
       }
 
-      // Cek apakah ada data
       if (chunksRef.current.length === 0) {
         throw new Error("Tidak ada data terekam. Coba lagi dan tetap di halaman ini.");
       }
 
       // ── 10. Patch durasi metadata yang sering salah (bug Chromium) ──────
-      // MediaRecorder dengan timeslice kadang menulis durasi header WebM yang
-      // jauh lebih kecil dari durasi rekaman aslinya (mis. kebaca 6s padahal
-      // sebenarnya 24s). Frame-nya tetap lengkap, hanya metadata-nya salah.
-      // Kita hitung durasi aktual dari waktu elapsed (performance.now), lalu
-      // patch ulang header durasinya dengan fix-webm-duration.
-      const actualDurationMs = performance.now() - recordStartRef.current;
+      // FIX UTAMA: pakai `videoDuration` (durasi ASLI video, dari video.duration)
+      // sebagai patokan akhir — BUKAN `performance.now() - recordStartRef.current`.
+      //
+      // Kenapa ini penting: performance.now() mengukur waktu REAL proses
+      // berjalan. Kalau ada freeze, drop frame, tab di-throttle browser, atau
+      // device lambat saat memproses video panjang, waktu real itu bisa jauh
+      // lebih kecil/besar dari durasi video sebenarnya. Itulah yang menyebabkan
+      // video 24 detik kepatch jadi metadata "4 detik" — bukan karena framenya
+      // hilang, tapi metadata durasi WebM-nya yang ditulis salah berdasarkan
+      // pengukuran waktu yang gak akurat.
+      //
+      // videoDuration adalah metadata asli file video yang di-upload, jadi
+      // selalu akurat sebagai patokan durasi output.
       let blob = new Blob(chunksRef.current, { type: mimeType });
 
       if (mimeType.includes("webm")) {
         try {
-          blob = await fixWebmDuration(blob, actualDurationMs, { logger: false });
+          const targetDurationMs = (isFinite(videoDuration) && videoDuration > 0)
+            ? videoDuration * 1000
+            : performance.now() - recordStartRef.current; // fallback kalau durasi video gak terbaca
+          blob = await fixWebmDuration(blob, targetDurationMs, { logger: false });
         } catch (fixErr) {
           console.warn("[Burikin] Gagal patch durasi webm, lanjut pakai blob asli:", fixErr);
         }
       }
+      // Catatan: kalau mimeType yang terpakai adalah MP4 (bukan webm), durasi
+      // metadata MP4 ditentukan oleh MediaRecorder/browser itu sendiri saat
+      // encoding — fixWebmDuration tidak berlaku untuk MP4. Kalau bug durasi
+      // pendek ini masih muncul khusus di file .mp4 (cek `fileExt` di hasil),
+      // berarti root cause-nya BUKAN metadata, melainkan MediaRecorder yang
+      // benar-benar berhenti menulis data video/audio lebih awal — di kode
+      // ini sudah diperkuat lewat stallWatchdog + requestData ganda di atas
+      // supaya kasus itu jauh lebih kecil kemungkinannya terjadi.
 
       const url = URL.createObjectURL(blob);
       setOutputURL(url);
       setProgress(100);
       setStatus("done");
 
-      // Kembalikan video ke mode preview
       video.muted = true;
       video.loop = true;
       video.currentTime = 0;
       video.play().catch(() => {});
-      setStatus((prev) => prev === "done" ? "done" : "previewing");
-      // Restart preview RAF
       setStatus("done");
 
     } catch (err) {
       console.error("[Burikin] Error:", err);
 
       if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+      if (stallWatchdogId) { clearInterval(stallWatchdogId); stallWatchdogId = null; }
 
       if (recorder && recorder.state !== "inactive") {
         try { recorder.stop(); } catch (_) {}
@@ -823,16 +864,15 @@ export default function Page() {
         audioCtxRef.current = null;
       }
 
-      // Kembalikan video ke mode normal
-      const video = videoRef.current;
-      if (video) {
-        video.muted = true;
-        video.loop = true;
-        try { video.play(); } catch (_) {}
+      const video2 = videoRef.current;
+      if (video2) {
+        video2.muted = true;
+        video2.loop = true;
+        try { video2.play(); } catch (_) {}
       }
 
       setErrorMsg(`${t.errorPrefix}: ` + (err?.message || t.errorUnknown));
-      setStatus("previewing"); // kembali ke preview
+      setStatus("previewing");
     }
   };
 
@@ -846,8 +886,6 @@ export default function Page() {
     return `${baseName}${affix}.${fileExt}`;
   };
 
-  // Helper: render string template berisi placeholder {appName} menjadi JSX
-  // dengan nama app dibungkus <strong>. Contoh: "Privasi penting bagi {appName}."
   const withAppName = (template) => {
     const appName = "Burikin Aja";
     const parts = template.split("{appName}");
@@ -902,7 +940,6 @@ export default function Page() {
 
   return (
     <main style={styles.main}>
-      {/* SIDEBAR BLOG */}
       <a href="/blog" style={styles.sidebarBlog}>
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -950,12 +987,10 @@ export default function Page() {
       <AdBanner slotId="9626464764" />
       <AdEffectiveCPMNative />
       <AdHighPerformance />
-      {/* Script-only ads (tidak render DOM, hanya inject script) */}
       <AdEffectiveCPMDirect />
       <AdEffectiveCPMPopunder />
 
       <section style={styles.panel}>
-        {/* KARTU PILIH MEDIA */}
         <div style={styles.mediaCardRow}>
           <button
             style={{ ...styles.mediaCard, borderColor: videoURL ? "var(--amber)" : "var(--line)", background: videoURL ? "rgba(255,186,0,0.06)" : "var(--panel)" }}
@@ -1019,7 +1054,6 @@ export default function Page() {
         {videoURL && (
           <>
             <video ref={videoRef} src={videoURL} onLoadedMetadata={onLoadedMeta} style={{ display: "none" }} playsInline />
-            {/* Video tidak di-mute permanen di sini — akan diatur saat proses */}
 
             <div style={styles.previewWrap}>
               {status === "processing" && (
@@ -1047,7 +1081,6 @@ export default function Page() {
                 onClick={() => setPresetKey("custom")}>{t.presetCustom}</button>
             </div>
 
-            {/* TOGGLE WATERMARK */}
             <label style={styles.watermarkToggleRow}>
               <input
                 type="checkbox"
@@ -1103,7 +1136,6 @@ export default function Page() {
                 </label>
               </div>
 
-              {/* EFEK AUDIO SPESIAL */}
               <div style={{ gridColumn: "1 / -1" }}>
                 <div style={styles.setSectionTitle}>{t.sectionAudioEffects}</div>
                 <div style={styles.audioEffectGrid}>
@@ -1190,7 +1222,6 @@ export default function Page() {
           </>
         )}
 
-        {/* ===== SECTION BURIKIN GAMBAR ===== */}
         {imageURL && (
           <div style={styles.imageBurikSection}>
             <div style={styles.imageBurikHeader}>
