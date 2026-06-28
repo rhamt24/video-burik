@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { LANGUAGES, DEFAULT_LANG, getTranslations } from "./i18n";
+import fixWebmDuration from "fix-webm-duration";
 
 // Preset mengubah state secara spesifik
 const PRESETS = {
@@ -21,6 +22,31 @@ function makeDistortionCurve(amount) {
     curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
   }
   return curve;
+}
+
+// Helper: render watermark di pojok kanan bawah canvas.
+// Dipanggil SETELAH ctx.filter di-reset ke "none", sehingga teks ini
+// tidak ikut terkena blur/pixelated/color filter dari efek burik.
+function drawWatermark(ctx, w, h) {
+  const text = "burikinaja.web.id";
+  const margin = Math.max(6, Math.round(w * 0.018));
+  const fontSize = Math.max(10, Math.round(w * 0.028));
+  ctx.save();
+  ctx.font = `700 ${fontSize}px monospace`;
+  ctx.textBaseline = "bottom";
+  ctx.textAlign = "right";
+  const textW = ctx.measureText(text).width;
+  const padX = fontSize * 0.55;
+  const padY = fontSize * 0.4;
+  const boxW = textW + padX * 2;
+  const boxH = fontSize + padY * 2;
+  const x = w - margin;
+  const y = h - margin;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(x - boxW, y - boxH, boxW, boxH);
+  ctx.fillStyle = "rgba(255,186,0,0.95)";
+  ctx.fillText(text, x - padX, y - padY);
+  ctx.restore();
 }
 
 // Helper: inject script tag sekali saja
@@ -128,6 +154,7 @@ export default function Page() {
   const rafRef = useRef(null);
   const drawIntervalRef = useRef(null);
   const isCancelledRef = useRef(false);
+  const recordStartRef = useRef(0); // waktu mulai recording (performance.now), untuk fix durasi webm
 
   // States dasar
   const [fileName, setFileName] = useState("");
@@ -167,6 +194,7 @@ export default function Page() {
   const [pixelScale, setPixelScale] = useState(1);
   const [stretchFactor, setStretchFactor] = useState(1);
   const [colorFilter, setColorFilter] = useState(0);
+  const [watermarkEnabled, setWatermarkEnabled] = useState(true); // default ON
 
   // States untuk Burikin Gambar
   const [imageURL, setImageURL] = useState(null);
@@ -180,8 +208,8 @@ export default function Page() {
   // Simpan setting saat ini ke ref agar bisa dibaca di dalam handler async tanpa stale closure
   const settingRef = useRef({});
   useEffect(() => {
-    settingRef.current = { resHeight, fpsTarget, videoQuality, audioQuality, audioEffect, pixelScale, stretchFactor, colorFilter };
-  }, [resHeight, fpsTarget, videoQuality, audioQuality, audioEffect, pixelScale, stretchFactor, colorFilter]);
+    settingRef.current = { resHeight, fpsTarget, videoQuality, audioQuality, audioEffect, pixelScale, stretchFactor, colorFilter, watermarkEnabled };
+  }, [resHeight, fpsTarget, videoQuality, audioQuality, audioEffect, pixelScale, stretchFactor, colorFilter, watermarkEnabled]);
 
   const updateCanvasSize = useCallback((vw, vh) => {
     const canvas = canvasRef.current;
@@ -367,6 +395,12 @@ export default function Page() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     }
     ctx.filter = "none";
+
+    // Watermark digambar SETELAH filter direset, jadi selalu tajam
+    // tidak terpengaruh blur/pixelated/grain/color filter apapun.
+    if (settings.watermarkEnabled) {
+      drawWatermark(ctx, canvas.width, canvas.height);
+    }
   }, []);
 
   const onLoadedMeta = () => {
@@ -646,6 +680,8 @@ export default function Page() {
       // ── 6. Mulai recording & draw loop ──────────────────────────────────
       // KRITIS: recorder.start() TANPA argumen = timeslice besar = lebih reliable.
       // Kita request data setiap 1 detik agar tidak kehilangan data saat video panjang.
+      // Catat waktu mulai recording secara presisi untuk fix metadata durasi nanti.
+      recordStartRef.current = performance.now();
       recorder.start(1000);
 
       // ── 7. Draw loop via setInterval (tidak bergantung pada rAF visibility) ──
@@ -742,7 +778,23 @@ export default function Page() {
         throw new Error("Tidak ada data terekam. Coba lagi dan tetap di halaman ini.");
       }
 
-      const blob = new Blob(chunksRef.current, { type: mimeType });
+      // ── 10. Patch durasi metadata yang sering salah (bug Chromium) ──────
+      // MediaRecorder dengan timeslice kadang menulis durasi header WebM yang
+      // jauh lebih kecil dari durasi rekaman aslinya (mis. kebaca 6s padahal
+      // sebenarnya 24s). Frame-nya tetap lengkap, hanya metadata-nya salah.
+      // Kita hitung durasi aktual dari waktu elapsed (performance.now), lalu
+      // patch ulang header durasinya dengan fix-webm-duration.
+      const actualDurationMs = performance.now() - recordStartRef.current;
+      let blob = new Blob(chunksRef.current, { type: mimeType });
+
+      if (mimeType.includes("webm")) {
+        try {
+          blob = await fixWebmDuration(blob, actualDurationMs, { logger: false });
+        } catch (fixErr) {
+          console.warn("[Burikin] Gagal patch durasi webm, lanjut pakai blob asli:", fixErr);
+        }
+      }
+
       const url = URL.createObjectURL(blob);
       setOutputURL(url);
       setProgress(100);
@@ -994,6 +1046,19 @@ export default function Page() {
               <button style={{ ...styles.presetBtn, ...(presetKey === "custom" ? styles.presetBtnActive : {}) }}
                 onClick={() => setPresetKey("custom")}>{t.presetCustom}</button>
             </div>
+
+            {/* TOGGLE WATERMARK */}
+            <label style={styles.watermarkToggleRow}>
+              <input
+                type="checkbox"
+                checked={watermarkEnabled}
+                onChange={(e) => setWatermarkEnabled(e.target.checked)}
+                style={styles.watermarkCheckbox}
+              />
+              <span style={styles.watermarkToggleLabel}>
+                Watermark <strong>burikinaja.web.id</strong> (pojok kanan bawah)
+              </span>
+            </label>
 
             <div style={styles.settingsGrid}>
               <div style={styles.setSectionGroup}>
@@ -1283,6 +1348,9 @@ const styles = {
   presetRow: { display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" },
   presetBtn: { background: "var(--panel)", border: "1px solid var(--line)", color: "var(--dim)", padding: "8px 14px", fontSize: 12, cursor: "pointer" },
   presetBtnActive: { borderColor: "var(--amber)", color: "var(--amber)" },
+  watermarkToggleRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 12, color: "var(--dim)", cursor: "pointer", userSelect: "none" },
+  watermarkCheckbox: { width: 16, height: 16, accentColor: "var(--amber)", cursor: "pointer" },
+  watermarkToggleLabel: { fontFamily: "var(--mono-display)", letterSpacing: "0.02em" },
   settingsGrid: { marginTop: 20, marginBottom: 20, display: "grid", gridTemplateColumns: "1fr", gap: 20, background: "var(--panel)", border: "1px solid var(--line)", padding: 20 },
   setSectionGroup: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 },
   setSectionTitle: { gridColumn: "1 / -1", fontSize: 14, fontWeight: "bold", color: "var(--text)", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 4 },
