@@ -28,29 +28,56 @@ function makeDistortionCurve(amount) {
 // Dipanggil SETELAH ctx.filter di-reset ke "none", sehingga teks ini
 // tidak ikut terkena blur/pixelated/color filter dari efek burik.
 //
-// PENTING (FIX): fontSize & margin dihitung dari `refW` (lebar VIDEO ASLI),
-// bukan dari `w` (lebar canvas output). Canvas output di preset PARAH/
-// MAJAPAHIT bisa cuma 144p lebar, jadi kalau basisnya `w`, watermark jadi
-// kelihatan jauh LEBIH BESAR secara relatif dibanding di preset RINGAN
-// (yang canvasnya 360p+). Dengan basis refW (video.videoWidth, yang selalu
-// sama untuk video yang sama, terlepas dari preset apapun yang dipilih),
-// ukuran watermark jadi konsisten di semua preset.
-function drawWatermark(ctx, w, h, refW) {
+// FIX (v3 — final): masalah sebenarnya adalah watermark harus kelihatan
+// SAMA BESAR SECARA VISUAL di layar, di semua preset. Tapi canvas.width
+// itu RESOLUSI INTERNAL (pixel buffer), bukan ukuran tampil di layar —
+// canvas selalu di-stretch via CSS ke lebar elemen yang sama (100% lebar
+// kontainer) terlepas dari resolusi internalnya. Preset RINGAN (360p+)
+// dan PARAH (144p) bisa tampil dengan lebar CSS yang SAMA di HP, padahal
+// resolusi pixel internalnya beda jauh.
+//
+// Jadi basis ukuran watermark HARUS pakai `dispW` (lebar tampil CSS
+// elemen canvas di layar — didapat dari canvas.getBoundingClientRect(),
+// atau di-pass manual), BUKAN canvas.width. Dengan ini, fontSize dalam
+// pixel internal otomatis di-scale supaya hasil render di layar selalu
+// sama besar secara visual, untuk preset & rasio aspek video apapun.
+function drawWatermark(ctx, w, h, dispW) {
   const text = "burikinaja.web.id";
-  const baseW = refW || w; // fallback ke w kalau refW gak tersedia
-  const margin = Math.max(6, Math.round(baseW * 0.018));
-  const fontSize = Math.max(10, Math.round(baseW * 0.028));
+  // Rasio antara resolusi internal canvas vs lebar tampil di layar (CSS).
+  // Kalau dispW gak tersedia (fallback), pakai w sehingga perilaku sama
+  // seperti basis lama (tidak pecah, hanya tidak ter-normalisasi).
+  const scaleFactor = dispW && dispW > 0 ? (w / dispW) : 1;
+
+  // 14px adalah ukuran visual TETAP yang diinginkan di layar (kecil, rapi,
+  // gak mengganggu) — ini yang akan terlihat SAMA di semua preset/resolusi.
+  const visualFontPx = 14;
+  let fontSize = Math.max(8, Math.round(visualFontPx * scaleFactor));
+
   ctx.save();
-  ctx.font = `700 ${fontSize}px monospace`;
   ctx.textBaseline = "bottom";
   ctx.textAlign = "right";
-  const textW = ctx.measureText(text).width;
+
+  // Safety clamp: kalau karena suatu hal hasil hitungan tetap kepanjangan
+  // untuk canvas (mis. canvas sangat kecil/ekstrem), auto-shrink supaya
+  // teks tidak pernah overflow keluar frame.
+  let textW = 0;
+  for (let i = 0; i < 12; i++) {
+    ctx.font = `700 ${fontSize}px monospace`;
+    textW = ctx.measureText(text).width;
+    const padXcheck = fontSize * 0.55;
+    const boxWcheck = textW + padXcheck * 2;
+    if (boxWcheck <= w * 0.9 || fontSize <= 6) break;
+    fontSize -= 1;
+  }
+
+  const margin = Math.max(3, Math.round(6 * scaleFactor));
   const padX = fontSize * 0.55;
   const padY = fontSize * 0.4;
   const boxW = textW + padX * 2;
   const boxH = fontSize + padY * 2;
   const x = w - margin;
   const y = h - margin;
+
   ctx.fillStyle = "rgba(0,0,0,0.55)";
   ctx.fillRect(x - boxW, y - boxH, boxW, boxH);
   ctx.fillStyle = "rgba(255,186,0,0.95)";
@@ -401,11 +428,19 @@ export default function Page() {
     }
     ctx.filter = "none";
 
-    // FIX: basis ukuran watermark dari video.videoWidth (lebar video ASLI),
-    // bukan canvas.width. Supaya watermark gak kelihatan jadi gede sendiri
-    // saat preset PARAH/MAJAPAHIT yang canvasnya kecil (144p).
+    // FIX: watermark basisnya lebar TAMPIL CSS canvas (canvas.clientWidth),
+    // bukan resolusi internal (canvas.width). Ini supaya ukuran watermark
+    // SELALU sama besar secara visual di layar HP, gak peduli preset atau
+    // rasio aspek video apa yang sedang dipakai — karena canvas selalu
+    // di-stretch ke lebar elemen yang sama di CSS.
+    //
+    // Saat recording berlangsung, canvas previewCanvas masih tetap attached
+    // ke DOM (cuma di-overlay processing screen), jadi clientWidth tetap
+    // valid. Kalau karena suatu hal clientWidth jadi 0 (mis. elemen belum
+    // ter-render/disembunyikan), fallback ke canvas.width sendiri.
     if (settings.watermarkEnabled) {
-      drawWatermark(ctx, canvas.width, canvas.height, video.videoWidth);
+      const dispW = canvas.clientWidth || canvas.width;
+      drawWatermark(ctx, canvas.width, canvas.height, dispW);
     }
   }, []);
 
