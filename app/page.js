@@ -25,56 +25,31 @@ function makeDistortionCurve(amount) {
 }
 
 // Helper: render watermark di pojok kanan bawah canvas.
-// Dipanggil SETELAH ctx.filter di-reset ke "none", sehingga teks ini
-// tidak ikut terkena blur/pixelated/color filter dari efek burik.
-//
-// FIX (v3 — final): masalah sebenarnya adalah watermark harus kelihatan
-// SAMA BESAR SECARA VISUAL di layar, di semua preset. Tapi canvas.width
-// itu RESOLUSI INTERNAL (pixel buffer), bukan ukuran tampil di layar —
-// canvas selalu di-stretch via CSS ke lebar elemen yang sama (100% lebar
-// kontainer) terlepas dari resolusi internalnya. Preset RINGAN (360p+)
-// dan PARAH (144p) bisa tampil dengan lebar CSS yang SAMA di HP, padahal
-// resolusi pixel internalnya beda jauh.
-//
-// Jadi basis ukuran watermark HARUS pakai `dispW` (lebar tampil CSS
-// elemen canvas di layar — didapat dari canvas.getBoundingClientRect(),
-// atau di-pass manual), BUKAN canvas.width. Dengan ini, fontSize dalam
-// pixel internal otomatis di-scale supaya hasil render di layar selalu
-// sama besar secara visual, untuk preset & rasio aspek video apapun.
-function drawWatermark(ctx, w, h, dispW) {
+// FIX: Sekarang karena canvas render utama selalu berukuran besar (HD),
+// watermark ini akan selalu jernih dan tajam (tidak terpengaruh preset burik).
+// Ukuran difix-kan sekitar 3.5% dari dimensi layar agar selalu kecil proporsional.
+function drawWatermark(ctx, w, h) {
   const text = "burikinaja.web.id";
-  // Rasio antara resolusi internal canvas vs lebar tampil di layar (CSS).
-  // Kalau dispW gak tersedia (fallback), pakai w sehingga perilaku sama
-  // seperti basis lama (tidak pecah, hanya tidak ter-normalisasi).
-  const scaleFactor = dispW && dispW > 0 ? (w / dispW) : 1;
-
-  // 14px adalah ukuran visual TETAP yang diinginkan di layar (kecil, rapi,
-  // gak mengganggu) — ini yang akan terlihat SAMA di semua preset/resolusi.
-  const visualFontPx = 14;
-  let fontSize = Math.max(8, Math.round(visualFontPx * scaleFactor));
+  
+  // Ambil sisi terkecil video untuk patokan ukuran supaya pas di video portrait/landscape
+  const minDim = Math.min(w, h);
+  
+  // Ukuran font 3.5% dari dimensi layar (bisa disesuaikan, dijamin kecil dan jelas)
+  let fontSize = Math.max(12, Math.round(minDim * 0.035));
 
   ctx.save();
   ctx.textBaseline = "bottom";
   ctx.textAlign = "right";
+  ctx.font = `700 ${fontSize}px monospace`;
 
-  // Safety clamp: kalau karena suatu hal hasil hitungan tetap kepanjangan
-  // untuk canvas (mis. canvas sangat kecil/ekstrem), auto-shrink supaya
-  // teks tidak pernah overflow keluar frame.
-  let textW = 0;
-  for (let i = 0; i < 12; i++) {
-    ctx.font = `700 ${fontSize}px monospace`;
-    textW = ctx.measureText(text).width;
-    const padXcheck = fontSize * 0.55;
-    const boxWcheck = textW + padXcheck * 2;
-    if (boxWcheck <= w * 0.9 || fontSize <= 6) break;
-    fontSize -= 1;
-  }
-
-  const margin = Math.max(3, Math.round(6 * scaleFactor));
+  const textW = ctx.measureText(text).width;
   const padX = fontSize * 0.55;
   const padY = fontSize * 0.4;
   const boxW = textW + padX * 2;
   const boxH = fontSize + padY * 2;
+  
+  // Margin agar rapi di pojok kanan bawah
+  const margin = Math.max(8, Math.round(minDim * 0.02));
   const x = w - margin;
   const y = h - margin;
 
@@ -183,14 +158,14 @@ export default function Page() {
   const imageInputRef = useRef(null);
   const imageCanvasRef = useRef(null);
 
-  // Refs untuk proses recording — tidak perlu re-render
+  // Refs untuk proses recording
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const rafRef = useRef(null);
   const drawIntervalRef = useRef(null);
   const isCancelledRef = useRef(false);
-  const recordStartRef = useRef(0); // waktu mulai recording (performance.now), fallback only
-  const lastDataAvailableRef = useRef(0); // FIX: timestamp data terakhir masuk, buat watchdog "stall"
+  const recordStartRef = useRef(0);
+  const lastDataAvailableRef = useRef(0); 
 
   // States dasar
   const [fileName, setFileName] = useState("");
@@ -207,7 +182,7 @@ export default function Page() {
   // State untuk Popup Legal
   const [activeModal, setActiveModal] = useState(null);
 
-  // State bahasa (language switcher)
+  // State bahasa
   const [lang, setLang] = useState(DEFAULT_LANG);
   useEffect(() => {
     try {
@@ -249,19 +224,24 @@ export default function Page() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const { resHeight: rh, stretchFactor: sf } = settingRef.current;
+    const { stretchFactor: sf } = settingRef.current;
 
-    let targetH = rh === 0 ? vh : Math.min(rh, vh);
-    const baseRatio = vw / vh;
-    let targetW = targetH * baseRatio * sf;
+    // FIX: Kanvas export (hasil akhir) di-lock ke ukuran besar/original agar 
+    // watermark selalu JELAS dan TIDAK BLUR walau pakai preset terendah (144p).
+    // Efek burik didapatkan dari upscaling, bukan dari export res yang kecil.
+    let mainH = vh;
+    let mainW = vw * sf;
 
-    if (targetW > 1920) {
-      targetW = 1920;
-      targetH = targetW / (baseRatio * sf);
+    // Limit resolusi export maks 1280px agar performa HP aman (gak crash)
+    const maxDim = 1280;
+    if (mainW > maxDim || mainH > maxDim) {
+      const scale = maxDim / Math.max(mainW, mainH);
+      mainW *= scale;
+      mainH *= scale;
     }
 
-    canvas.width = Math.round(targetW) & ~1 || 2;
-    canvas.height = Math.round(targetH) & ~1 || 2;
+    canvas.width = Math.round(mainW) & ~1 || 2;
+    canvas.height = Math.round(mainH) & ~1 || 2;
   }, []);
 
   const applyPreset = (key) => {
@@ -401,7 +381,7 @@ export default function Page() {
     const ctx = canvas.getContext("2d");
     const pCtx = pCanvas.getContext("2d");
 
-    const { videoQuality: vq, pixelScale: ps, colorFilter: cf } = settings;
+    const { videoQuality: vq, pixelScale: ps, colorFilter: cf, resHeight: rh, stretchFactor: sf } = settings;
     const contrast = vq === 1 ? 1.15 : vq === 2 ? 1.05 : 1;
     const saturate = vq === 1 ? 1.2 : vq === 2 ? 1.1 : 1;
 
@@ -410,37 +390,37 @@ export default function Page() {
     else if (cf === 2) filterStr += ' sepia(80%) hue-rotate(-10deg) saturate(1.5)';
     else if (cf === 3) filterStr += ' saturate(3) contrast(1.5) hue-rotate(20deg)';
 
-    if (ps > 1) {
-      const pw = Math.max(2, Math.floor(canvas.width / ps));
-      const ph = Math.max(2, Math.floor(canvas.height / ps));
-      if (pCanvas.width !== pw || pCanvas.height !== ph) {
-        pCanvas.width = pw; pCanvas.height = ph;
-      }
-      pCtx.imageSmoothingEnabled = false;
-      pCtx.drawImage(video, 0, 0, pw, ph);
-      ctx.imageSmoothingEnabled = false;
-      ctx.filter = filterStr;
-      ctx.drawImage(pCanvas, 0, 0, pw, ph, 0, 0, canvas.width, canvas.height);
-    } else {
-      ctx.imageSmoothingEnabled = true;
-      ctx.filter = filterStr;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    }
-    ctx.filter = "none";
+    // 1. Hitung ukuran internal "burik" (kecil)
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const baseRatio = vw / vh;
 
-    // FIX: watermark basisnya lebar TAMPIL CSS canvas (canvas.clientWidth),
-    // bukan resolusi internal (canvas.width). Ini supaya ukuran watermark
-    // SELALU sama besar secara visual di layar HP, gak peduli preset atau
-    // rasio aspek video apa yang sedang dipakai — karena canvas selalu
-    // di-stretch ke lebar elemen yang sama di CSS.
-    //
-    // Saat recording berlangsung, canvas previewCanvas masih tetap attached
-    // ke DOM (cuma di-overlay processing screen), jadi clientWidth tetap
-    // valid. Kalau karena suatu hal clientWidth jadi 0 (mis. elemen belum
-    // ter-render/disembunyikan), fallback ke canvas.width sendiri.
+    let targetH = rh === 0 ? vh : Math.min(rh, vh);
+    let targetW = targetH * baseRatio * sf;
+
+    const pw = Math.max(2, Math.floor(targetW / ps));
+    const ph = Math.max(2, Math.floor(targetH / ps));
+
+    if (pCanvas.width !== pw || pCanvas.height !== ph) {
+      pCanvas.width = pw; 
+      pCanvas.height = ph;
+    }
+
+    // 2. Gambar video ke kanvas kecil (efek burik diproses di sini)
+    pCtx.imageSmoothingEnabled = true;
+    pCtx.filter = filterStr;
+    pCtx.drawImage(video, 0, 0, pw, ph);
+    pCtx.filter = "none";
+
+    // 3. Tarik/stretch kanvas kecil tadi ke KANVAS BESAR/UTAMA
+    // imageSmoothingEnabled = false membuat pixel kotak-kotaknya kelihatan 100%
+    ctx.imageSmoothingEnabled = false;
+    ctx.filter = "none";
+    ctx.drawImage(pCanvas, 0, 0, pw, ph, 0, 0, canvas.width, canvas.height);
+
+    // 4. Tulis Watermark (Karena canvas width & height sudah HD, WM akan tajam!)
     if (settings.watermarkEnabled) {
-      const dispW = canvas.clientWidth || canvas.width;
-      drawWatermark(ctx, canvas.width, canvas.height, dispW);
+      drawWatermark(ctx, canvas.width, canvas.height);
     }
   }, []);
 
@@ -455,7 +435,7 @@ export default function Page() {
     video.play().catch((e) => console.log("Auto-play preview tertahan browser", e));
   };
 
-  // Preview loop — hanya saat previewing, bukan saat processing
+  // Preview loop
   useEffect(() => {
     if (status !== "previewing") return;
     let lastDraw = 0;
@@ -492,13 +472,12 @@ export default function Page() {
     let recorder = null;
     let audioCtx = null;
     let drawTimer = null;
-    let stallWatchdogId = null; // FIX: watchdog khusus deteksi video "macet diam"
+    let stallWatchdogId = null; 
 
     try {
-      // ── 1. Reset video ke awal ──────────────────────────────────────────
       video.pause();
       video.loop = false;
-      video.muted = true; // Harus muted dulu agar captureStream test tidak konflik
+      video.muted = true; 
 
       await new Promise((resolve) => {
         const onSeeked = () => { video.removeEventListener("seeked", onSeeked); resolve(); };
@@ -507,19 +486,12 @@ export default function Page() {
         setTimeout(resolve, 1000);
       });
 
-      // ── 2. Update canvas size berdasarkan video asli ────────────────────
       updateCanvasSize(video.videoWidth, video.videoHeight);
 
-      // Draw frame pertama sebelum recorder dimulai
       drawFrameToCanvas(video, canvas, pCanvas, settings);
 
-      // ── 3. Buat stream dari canvas ──────────────────────────────────────
       const canvasStream = canvas.captureStream(settings.fpsTarget);
 
-      // ── 4. Setup audio via AudioContext ─────────────────────────────────
-      // Sumber audio dari element video (MediaElementSourceNode), BUKAN dari
-      // captureStream audio track, karena captureStream audio sering lost
-      // saat video di-seek / play ulang.
       let finalAudioTracks = [];
 
       const testStream = video.captureStream ? video.captureStream() : null;
@@ -678,7 +650,6 @@ export default function Page() {
         finalAudioTracks = dest.stream.getAudioTracks();
       }
 
-      // ── 5. Buat MediaRecorder ───────────────────────────────────────────
       const combined = new MediaStream([
         canvasStream.getVideoTracks()[0],
         ...finalAudioTracks,
@@ -693,6 +664,7 @@ export default function Page() {
       }
       setFileExt(ext);
 
+      // Bitrate rendah supaya hasil videonya pecah-pecah/blocky biarpun resolusi kanvasnya besar
       let targetVBitrate = 1_000_000;
       if (settings.videoQuality === 1) targetVBitrate = 80_000;
       else if (settings.videoQuality === 2) targetVBitrate = 200_000;
@@ -705,12 +677,6 @@ export default function Page() {
       });
       recorderRef.current = recorder;
 
-      // FIX: track timestamp data terakhir masuk + total bytes, supaya kita
-      // bisa tahu kalau MediaRecorder tiba-tiba berhenti ngirim data padahal
-      // video masih jalan (penyebab paling umum dari "24s jadi cuma 4s" —
-      // recorder stuck/stalled di tengah jalan tapi loop nunggu 'ended' tetap
-      // jalan terus sampai akhir, sehingga proses kelihatan "selesai normal"
-      // padahal chunks yang terekam cuma sebagian).
       let totalBytesRecorded = 0;
       lastDataAvailableRef.current = performance.now();
       recorder.ondataavailable = (e) => {
@@ -725,34 +691,22 @@ export default function Page() {
         console.error("[Burikin] MediaRecorder error:", e.error || e);
       };
 
-      // ── 6. Mulai recording & draw loop ──────────────────────────────────
-      // Timeslice 1000ms = recorder diminta flush data per 1 detik, supaya
-      // gak nunggu sampai akhir buat dapet data (lebih aman dari kehilangan
-      // data kalau ada crash di tengah).
       recordStartRef.current = performance.now();
       recorder.start(1000);
 
-      // ── 7. Draw loop via setInterval (tidak di-throttle saat tab background) ──
       const frameInterval = Math.max(1000 / settings.fpsTarget, 33);
       drawTimer = setInterval(() => {
         if (isCancelledRef.current) return;
         drawFrameToCanvas(video, canvas, pCanvas, settings);
       }, frameInterval);
 
-      // ── 8. Play video & tunggu selesai ──────────────────────────────────
       video.muted = false;
       video.volume = 1.0;
 
       await video.play();
 
-      const videoDuration = video.duration; // durasi ASLI video — dipakai sebagai patokan akhir
+      const videoDuration = video.duration;
 
-      // FIX: watchdog "stall" terpisah dari watchdog total durasi. Kalau
-      // MediaRecorder berhenti menerima data selama >5 detik PADAHAL video
-      // masih berjalan (video.paused === false, video belum ended), berarti
-      // ada sesuatu yang macet (browser throttle, AudioContext drop, dll).
-      // Kita coba "bangunkan" recorder dengan requestData() supaya gak diam
-      // total dan kehilangan sisa rekaman.
       stallWatchdogId = setInterval(() => {
         if (isCancelledRef.current || !recorder || recorder.state !== "recording") return;
         const sinceLastData = performance.now() - lastDataAvailableRef.current;
@@ -785,7 +739,6 @@ export default function Page() {
         };
         video.addEventListener("pause", onPause);
 
-        // Polling currentTime — paling robust untuk semua skenario browser.
         const pollingId = setInterval(() => {
           if (isCancelledRef.current) { finish("cancelled"); return; }
           if (!video.paused && !video.ended) {
@@ -799,27 +752,17 @@ export default function Page() {
           }
         }, 250);
 
-        // Watchdog total = durasi video + buffer 15 detik. Ini batas darurat
-        // KALAU video benar-benar macet total (bukan stall recorder).
         const watchdogMs = (isFinite(videoDuration) && videoDuration > 0)
           ? (videoDuration * 1000 + 15000)
           : 10 * 60 * 1000;
         const watchdogId = setTimeout(() => finish("watchdog timeout"), watchdogMs);
       });
 
-      // ── 9. Selesai, stop semua ──────────────────────────────────────────
       clearInterval(drawTimer); drawTimer = null;
       if (stallWatchdogId) { clearInterval(stallWatchdogId); stallWatchdogId = null; }
 
-      // Draw frame terakhir untuk memastikan recorder dapat frame penutup
       drawFrameToCanvas(video, canvas, pCanvas, settings);
 
-      // FIX: requestData() + tunggu lebih lama (500ms, bukan 200ms) sebelum
-      // stop(), supaya chunk terakhir (terutama audio yang sering lebih
-      // lambat flush daripada video) benar-benar masuk ke chunksRef sebelum
-      // recorder ditutup. 200ms kadang gak cukup di device yang lebih lambat
-      // atau saat browser sedang sibuk → inilah salah satu sumber audio
-      // "hilang" di detik-detik akhir / video kepotong duluan.
       if (recorder.state === "recording") {
         recorder.requestData();
         await new Promise(r => setTimeout(r, 500));
@@ -838,40 +781,18 @@ export default function Page() {
         throw new Error("Tidak ada data terekam. Coba lagi dan tetap di halaman ini.");
       }
 
-      // ── 10. Patch durasi metadata yang sering salah (bug Chromium) ──────
-      // FIX UTAMA: pakai `videoDuration` (durasi ASLI video, dari video.duration)
-      // sebagai patokan akhir — BUKAN `performance.now() - recordStartRef.current`.
-      //
-      // Kenapa ini penting: performance.now() mengukur waktu REAL proses
-      // berjalan. Kalau ada freeze, drop frame, tab di-throttle browser, atau
-      // device lambat saat memproses video panjang, waktu real itu bisa jauh
-      // lebih kecil/besar dari durasi video sebenarnya. Itulah yang menyebabkan
-      // video 24 detik kepatch jadi metadata "4 detik" — bukan karena framenya
-      // hilang, tapi metadata durasi WebM-nya yang ditulis salah berdasarkan
-      // pengukuran waktu yang gak akurat.
-      //
-      // videoDuration adalah metadata asli file video yang di-upload, jadi
-      // selalu akurat sebagai patokan durasi output.
       let blob = new Blob(chunksRef.current, { type: mimeType });
 
       if (mimeType.includes("webm")) {
         try {
           const targetDurationMs = (isFinite(videoDuration) && videoDuration > 0)
             ? videoDuration * 1000
-            : performance.now() - recordStartRef.current; // fallback kalau durasi video gak terbaca
+            : performance.now() - recordStartRef.current;
           blob = await fixWebmDuration(blob, targetDurationMs, { logger: false });
         } catch (fixErr) {
           console.warn("[Burikin] Gagal patch durasi webm, lanjut pakai blob asli:", fixErr);
         }
       }
-      // Catatan: kalau mimeType yang terpakai adalah MP4 (bukan webm), durasi
-      // metadata MP4 ditentukan oleh MediaRecorder/browser itu sendiri saat
-      // encoding — fixWebmDuration tidak berlaku untuk MP4. Kalau bug durasi
-      // pendek ini masih muncul khusus di file .mp4 (cek `fileExt` di hasil),
-      // berarti root cause-nya BUKAN metadata, melainkan MediaRecorder yang
-      // benar-benar berhenti menulis data video/audio lebih awal — di kode
-      // ini sudah diperkuat lewat stallWatchdog + requestData ganda di atas
-      // supaya kasus itu jauh lebih kecil kemungkinannya terjadi.
 
       const url = URL.createObjectURL(blob);
       setOutputURL(url);
