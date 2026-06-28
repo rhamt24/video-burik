@@ -23,6 +23,19 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
+// Helper: inject script tag sekali saja
+function useScript(src, attrs = {}) {
+  useEffect(() => {
+    if (!src) return;
+    if (document.querySelector(`script[src="${src}"]`)) return;
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    Object.entries(attrs).forEach(([k, v]) => s.setAttribute(k, v));
+    document.head.appendChild(s);
+  }, [src]);
+}
+
 // AdSense banner (existing)
 function AdBanner({ slotId }) {
   useEffect(() => {
@@ -36,6 +49,67 @@ function AdBanner({ slotId }) {
         data-ad-format="auto" data-full-width-responsive="true" />
     </div>
   );
+}
+
+// EffectiveCPM — native/invoke banner (container style)
+// Muat script invoke.js + render container div
+function AdEffectiveCPMNative() {
+  useScript(
+    "https://pl30087445.effectivecpmnetwork.com/4357f30a7ce316369e54e9b449b4699b/invoke.js",
+    { "data-cfasync": "false" }
+  );
+  return (
+    <div style={styles.adContainer}>
+      <span style={styles.adLabel}>- Advertisement -</span>
+      <div id="container-4357f30a7ce316369e54e9b449b4699b" />
+    </div>
+  );
+}
+
+// EffectiveCPM — direct JS banner (pl30087444)
+function AdEffectiveCPMDirect() {
+  useScript("https://pl30087444.effectivecpmnetwork.com/07/a3/3f/07a33fee4a04d3d83f52cbd6617bb55a.js");
+  return null; // script self-renders
+}
+
+// HighPerformanceFormat — iframe banner 468x60
+function AdHighPerformance() {
+  useEffect(() => {
+    if (window._hpfLoaded) return;
+    window._hpfLoaded = true;
+    window.atOptions = {
+      key: "ab33fad339c32cb68a3d74a345e9be0a",
+      format: "iframe",
+      height: 60,
+      width: 468,
+      params: {},
+    };
+    const s = document.createElement("script");
+    s.src = "https://www.highperformanceformat.com/ab33fad339c32cb68a3d74a345e9be0a/invoke.js";
+    s.async = true;
+    document.head.appendChild(s);
+  }, []);
+  return (
+    <div style={{ ...styles.adContainer, overflow: "hidden" }}>
+      <span style={styles.adLabel}>- Advertisement -</span>
+    </div>
+  );
+}
+
+// EffectiveCPM — popunder/onclick (pl30087448)
+function AdEffectiveCPMPopunder() {
+  useScript("https://pl30087448.effectivecpmnetwork.com/db/6b/21/db6b216e120ac6cfff8fd67c8cf8ba43.js");
+  return null; // script-only, tidak perlu elemen
+}
+
+// EffectiveCPM — direct link tracker (dipanggil sekali di level page)
+function useEffectiveCPMTracker() {
+  useEffect(() => {
+    if (window._ecpmTracked) return;
+    window._ecpmTracked = true;
+    const img = new Image();
+    img.src = "https://www.effectivecpmnetwork.com/b4yirwu9c?key=6938c85dbfc09b80aac0b87fb209b0f0";
+  }, []);
 }
 
 export default function Page() {
@@ -99,6 +173,9 @@ export default function Page() {
   const [imageName, setImageName] = useState("");
   const [imagePixel, setImagePixel] = useState(8);
   const [imageFilter, setImageFilter] = useState(0);
+
+  // Aktifkan tracker link EffectiveCPM sekali saat page load
+  useEffectiveCPMTracker();
 
   // Simpan setting saat ini ke ref agar bisa dibaca di dalam handler async tanpa stale closure
   const settingRef = useRef({});
@@ -819,6 +896,11 @@ export default function Page() {
       </section>
 
       <AdBanner slotId="9626464764" />
+      <AdEffectiveCPMNative />
+      <AdHighPerformance />
+      {/* Script-only ads (tidak render DOM, hanya inject script) */}
+      <AdEffectiveCPMDirect />
+      <AdEffectiveCPMPopunder />
 
       <section style={styles.panel}>
         {/* KARTU PILIH MEDIA */}
@@ -1037,6 +1119,7 @@ export default function Page() {
                   </a>
                 </div>
                 <AdBanner slotId="9626464764" />
+                <AdEffectiveCPMNative />
               </>
             )}
           </>
